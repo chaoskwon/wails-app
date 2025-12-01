@@ -1,0 +1,84 @@
+name: Wails Dev Build
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            platform: windows/amd64
+            ext: .exe
+          - os: macos-latest
+            platform: darwin/amd64
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Wails Doctor
+        run: wails doctor
+
+      - name: Go Mod Tidy
+        run: go mod tidy
+
+      - name: Build Wails App (Windows)
+        if: matrix.os == 'windows-latest'
+        run: wails build -platform ${{ matrix.platform }} -nsis -v 2
+
+      - name: Build Wails App (Mac)
+        if: matrix.os == 'macos-latest'
+        run: wails build -platform ${{ matrix.platform }} -v 2
+
+      - name: Rename Binary (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: ./build/bin
+        run: |
+          mv wails-app.exe wails-app_windows_amd64.exe
+
+      - name: Rename Binary (Mac)
+        if: matrix.os == 'macos-latest'
+        working-directory: ./build/bin
+        run: |
+          # Wails on Mac creates wails-app.app
+          # We need to zip it or extract the binary for selfupdate
+          # For selfupdate to work with binary replacement, we need the binary itself.
+          # The binary is at wails-app.app/Contents/MacOS/wails-app
+          cp wails-app.app/Contents/MacOS/wails-app wails-app_darwin_amd64
+
+      - name: Upload Artifacts (Windows)
+        uses: actions/upload-artifact@v3
+        if: matrix.os == 'windows-latest'
+        with:
+          name: wails-app-windows-dev
+          path: |
+            build/bin/wails-app_windows_amd64.exe
+            build/bin/setup.exe
+
+      - name: Upload Artifacts (Mac)
+        uses: actions/upload-artifact@v3
+        if: matrix.os == 'macos-latest'
+        with:
+          name: wails-app-mac-dev
+          path: |
+            build/bin/wails-app_darwin_amd64
