@@ -42,13 +42,13 @@ jobs:
       - name: Go Mod Tidy
         run: go mod tidy
 
-      - name: Build Wails App
-        run: |
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            wails build -platform ${{ matrix.platform }} -nsis -v 2
-          else
-            wails build -platform ${{ matrix.platform }} -v 2
-          fi
+      - name: Build Wails App (Windows)
+        if: matrix.os == 'windows-latest'
+        run: wails build -platform ${{ matrix.platform }} -nsis -v 2
+
+      - name: Build Wails App (Mac)
+        if: matrix.os == 'macos-latest'
+        run: wails build -platform ${{ matrix.platform }} -v 2
 
       - name: Rename Binary (Windows)
         if: matrix.os == 'windows-latest'
