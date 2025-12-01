@@ -36,12 +36,18 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+      - name: Wails Doctor
+        run: wails doctor
+
+      - name: Go Mod Tidy
+        run: go mod tidy
+
       - name: Build Wails App
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            wails build -platform ${{ matrix.platform }} -nsis
+            wails build -platform ${{ matrix.platform }} -nsis -v 2
           else
-            wails build -platform ${{ matrix.platform }}
+            wails build -platform ${{ matrix.platform }} -v 2
           fi
 
       - name: Rename Binary (Windows)
