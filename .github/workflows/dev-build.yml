@@ -67,7 +67,7 @@ jobs:
           cp wails-app.app/Contents/MacOS/wails-app wails-app_darwin_amd64
 
       - name: Upload Artifacts (Windows)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: matrix.os == 'windows-latest'
         with:
           name: wails-app-windows-dev
@@ -76,7 +76,7 @@ jobs:
             build/bin/setup.exe
 
       - name: Upload Artifacts (Mac)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: matrix.os == 'macos-latest'
         with:
           name: wails-app-mac-dev
