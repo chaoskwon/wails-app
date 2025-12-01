@@ -33,6 +33,7 @@ function App() {
   const [machineName, setMachineName] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [accountName, setAccountName] = useState('');
+  const [appVersion, setAppVersion] = useState('');
 
   // Default IDs for API calls
   const [defaultPartnerId, setDefaultPartnerId] = useState<number | null>(null);
@@ -46,7 +47,23 @@ function App() {
   useEffect(() => {
     checkRegistration();
     checkForUpdates();
+    checkRegistration();
+    checkForUpdates();
+    fetchVersion();
   }, []);
+
+  const fetchVersion = async () => {
+    try {
+      // @ts-ignore
+      if (window['go'] && window['go']['main'] && window['go']['main']['App'] && window['go']['main']['App']['GetVersion']) {
+        // @ts-ignore
+        const version = await window['go']['main']['App']['GetVersion']();
+        setAppVersion(version);
+      }
+    } catch (e) {
+      console.error("Failed to fetch version", e);
+    }
+  };
 
   const checkForUpdates = async () => {
     try {
@@ -262,6 +279,7 @@ function App() {
           <span>작업건수: {stats.count}</span>
           <span>미배송처리: {stats.unshipped}</span>
           <span>배송처리: {stats.shipped}</span>
+          {appVersion && <span style={{ marginLeft: 'auto' }}>v{appVersion}</span>}
         </div>
 
         {/* Account Selection Modal */}

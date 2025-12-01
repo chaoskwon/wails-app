@@ -40,6 +40,11 @@ func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
 
+// GetVersion returns the application version
+func (a *App) GetVersion() string {
+	return Version
+}
+
 // CheckForUpdates checks for updates and applies them if available
 func (a *App) CheckForUpdates() (string, error) {
 	// TODO: Configure the repository slug correctly
