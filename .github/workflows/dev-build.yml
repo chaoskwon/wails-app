@@ -42,13 +42,29 @@ jobs:
       - name: Go Mod Tidy
         run: go mod tidy
 
+      - name: Set Version (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $json = Get-Content wails.json | ConvertFrom-Json
+          $ver = $json.info.productVersion
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          echo "APP_VERSION=$ver-dev-$sha" >> $env:GITHUB_ENV
+
+      - name: Set Version (Mac)
+        if: matrix.os == 'macos-latest'
+        run: |
+          VER=$(grep -o '"productVersion": "[^"]*"' wails.json | cut -d'"' -f4)
+          SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "APP_VERSION=$VER-dev-$SHA" >> $GITHUB_ENV
+
       - name: Build Wails App (Windows)
         if: matrix.os == 'windows-latest'
-        run: wails build -platform ${{ matrix.platform }} -nsis -v 2
+        run: wails build -platform ${{ matrix.platform }} -nsis -v 2 -ldflags "-X main.Version=${{ env.APP_VERSION }}"
 
       - name: Build Wails App (Mac)
         if: matrix.os == 'macos-latest'
-        run: wails build -platform ${{ matrix.platform }} -v 2
+        run: wails build -platform ${{ matrix.platform }} -v 2 -ldflags "-X main.Version=${{ env.APP_VERSION }}"
 
       - name: Rename Binary (Windows)
         if: matrix.os == 'windows-latest'
