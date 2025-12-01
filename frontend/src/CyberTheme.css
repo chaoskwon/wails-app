@@ -1,0 +1,144 @@
+:root {
+  --neon-blue: #00f7ff;
+  --neon-green: #39ff14;
+  --neon-red: #ff073a;
+  --neon-yellow: #fff01f;
+  --dark-bg: #121212;
+  --panel-bg: #1e1e1e;
+}
+
+/* 이 클래스가 적용된 컨테이너 내부는 모두 어두운 테마 적용 */
+.cyber-container {
+  background-color: var(--dark-bg) !important; /* 배경색 강제 적용 */
+  color: white;
+  
+  /* 높이와 너비를 부모 요소에 꽉 차게 설정 */
+  height: 100%;
+  width: 100%;
+  
+  /* 부모 컴포넌트(Tabs 등)에 패딩이 있다면 이를 무시하고 꽉 채우기 위해 음수 마진 사용 */
+  /* 필요에 따라 -10px, -20px 등으로 조절 가능 */
+  margin: 0; 
+  padding: 20px;
+  
+  font-family: 'Rajdhani', sans-serif;
+  box-sizing: border-box; /* 패딩이 너비에 포함되도록 설정 */
+  overflow-y: auto; /* 내용이 길면 스크롤 */
+}
+
+/* --- 공통 타이틀 스타일 --- */
+.cyber-title {
+  color: var(--neon-blue);
+  text-shadow: 0 0 5px var(--neon-blue);
+  margin-bottom: 15px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* --- 좌측 리스트 아이템 (카드 형태) --- */
+.cyber-list-item {
+  background-color: var(--panel-bg) !important;
+  border: 1px solid #333;
+  margin-bottom: 10px;
+  color: white !important;
+  transition: all 0.3s ease;
+}
+
+/* 완료된 항목 (초록색) */
+.cyber-list-item.completed {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 10px var(--neon-green) inset;
+}
+
+/* 미완료/차이 항목 (빨간색) */
+.cyber-list-item.diff {
+  border-color: var(--neon-red);
+  box-shadow: 0 0 10px var(--neon-red) inset;
+}
+
+.cyber-list-item .ant-card-body {
+  padding: 12px 20px !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 리스트 헤더 */
+.cyber-list-header {
+  display: flex;
+  padding: 10px 20px;
+  color: #aaa;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+/* --- 우측 패널 스타일 --- */
+.cyber-panel {
+  background-color: var(--panel-bg);
+  border: 2px solid var(--neon-blue);
+  box-shadow: 0 0 15px var(--neon-blue);
+  padding: 25px;
+  height: 100%;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+}
+
+/* 스캔 입력창 커스텀 */
+.cyber-input {
+  background-color: transparent !important;
+  border: 2px solid var(--neon-blue) !important;
+  color: var(--neon-blue) !important;
+  box-shadow: 0 0 5px var(--neon-blue);
+  font-size: 18px;
+  text-align: center;
+}
+.cyber-input::placeholder { color: rgba(0, 247, 255, 0.5); }
+
+/* 카운터 텍스트 */
+.cyber-stat-text {
+  font-size: 20px;
+  color: white;
+}
+.cyber-stat-value {
+  font-size: 28px;
+  font-weight: bold;
+  margin-left: 10px;
+}
+
+/* 진행률 표시줄 커스텀 */
+.cyber-progress .ant-progress-inner {
+  background-color: #333 !important;
+}
+.cyber-progress .ant-progress-bg {
+  background: linear-gradient(90deg, var(--neon-green), #00ff88) !important;
+  box-shadow: 0 0 10px var(--neon-green);
+}
+.cyber-progress .ant-progress-text {
+  color: white !important;
+  font-weight: bold;
+}
+
+/* 하단 버튼 커스텀 */
+.cyber-btn {
+  height: 50px;
+  font-size: 18px;
+  font-weight: bold;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: black !important;
+}
+.cyber-btn-yellow {
+  background-color: var(--neon-yellow) !important;
+  box-shadow: 0 0 15px var(--neon-yellow);
+}
+.cyber-btn-blue {
+  background-color: var(--neon-blue) !important;
+  box-shadow: 0 0 15px var(--neon-blue);
+}

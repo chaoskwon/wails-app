@@ -1,0 +1,67 @@
+.container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f0f2f5;
+}
+
+.content-area {
+  flex: 1;
+  padding: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 우측 스캔 영역 (노란색 배경 스타일 모방) */
+.scan-panel {
+  background-color: #fdfde0;
+  /* 이미지의 연한 노란색 */
+  border: 1px solid #d9d9d9;
+  padding: 20px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.big-text {
+  font-size: 24px;
+  font-weight: bold;
+  margin: 10px 0;
+}
+
+/* 하단 상태바 */
+.footer-bar {
+  background-color: #e6e6e6;
+  padding: 5px 20px;
+  border-top: 1px solid #ccc;
+  display: flex;
+  justify-content: space-around;
+  font-size: 14px;
+  font-weight: bold;
+  color: black;
+}
+
+.ant-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.ant-tabs-content-holder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* 스크롤은 내부 페이지에 위임 */
+}
+
+.ant-tabs-content {
+  flex: 1;
+  height: 100%;
+}
+
+.ant-tabs-tabpane {
+  height: 100%;
+}
