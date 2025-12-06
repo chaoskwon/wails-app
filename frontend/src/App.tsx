@@ -1,14 +1,16 @@
 import { useState, useEffect, createContext } from 'react';
 import './App.css';
+import logo from './assets/images/logo_white.jpeg';
 import { Tabs, message, Tag, Space, Modal, List, Button } from 'antd';
 import SinglePack from './SinglePack';
 import MultiPack from './MultiPack';
 import History from './History';
 import InspectionPage from './InspectionPage';
 import SettingsPage from './SettingsPage';
-import SpeedBaggerLegacy from './SpeedBaggerLegacy';
 import { API_BASE_URL } from './config';
 import { ApiAccount } from './types';
+import AdminSettingsPage from './AdminSettingsPage';
+import { Quit } from '../wailsjs/runtime/runtime';
 
 // Create Context for Global Defaults
 export const AppContext = createContext<{
@@ -18,13 +20,17 @@ export const AppContext = createContext<{
   printerAux: string;
   templateId: string;
   machineId: number | null;
+  shipper_ids: number[] | null;
+  accountType: string;
 }>({
   partnerId: null,
   accountId: null,
   printerMain: '',
   printerAux: '',
   templateId: '',
-  machineId: null
+  machineId: null,
+  shipper_ids: null,
+  accountType: ''
 });
 
 function App() {
@@ -38,11 +44,18 @@ function App() {
   // Default IDs for API calls
   const [defaultPartnerId, setDefaultPartnerId] = useState<number | null>(null);
   const [defaultAccountId, setDefaultAccountId] = useState<number | null>(null);
+  const [currentAccountType, setCurrentAccountType] = useState<string>('');
 
   // Account Selection Modal State
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [availableAccounts, setAvailableAccounts] = useState<ApiAccount[]>([]);
   const [currentMachine, setCurrentMachine] = useState<any>(null);
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+
+  const handleQuit = () => {
+    Quit();
+  };
 
   useEffect(() => {
     checkRegistration();
@@ -97,6 +110,10 @@ function App() {
         const machine = machines.find(m => m.machine_uuid === uuid);
 
         if (machine) {
+          if (machine.is_active !== 'Y') {
+            setIsApprovalModalOpen(true);
+            return;
+          }
           setCurrentMachine(machine);
           setMachineName(machine.machine_name);
           setDefaultPartnerId(machine.partner_id);
@@ -125,6 +142,19 @@ function App() {
         const accounts: ApiAccount[] = await res.json();
         const partnerAccounts = accounts.filter(a => a.partner_id === machine.partner_id);
 
+        // 1. Check if machine already has a valid account_id set
+        if (machine.account_id) {
+          const configuredAccount = partnerAccounts.find(a => a.account_id === machine.account_id);
+          if (configuredAccount) {
+            setDefaultAccountId(configuredAccount.account_id);
+            setAccountName(configuredAccount.account_name);
+            setCurrentAccountType(configuredAccount.account_type);
+            // message.success(`API 계정 '${configuredAccount.account_name}'이(가) 설정되었습니다.`);
+            return; // Skip modal
+          }
+        }
+
+        // 2. Fallback: Auto-select if only one, or show modal
         if (partnerAccounts.length === 1) {
           // Only one account: Auto-select
           const account = partnerAccounts[0];
@@ -135,6 +165,7 @@ function App() {
             // Just set state
             setDefaultAccountId(account.account_id);
             setAccountName(account.account_name);
+            setCurrentAccountType(account.account_type);
             message.success(`API 계정 '${account.account_name}'이(가) 자동 선택되었습니다.`);
           }
         } else if (partnerAccounts.length > 1) {
@@ -145,7 +176,10 @@ function App() {
           // If already set, we can show it as current, but we still force selection/confirmation
           if (machine.account_id) {
             const current = partnerAccounts.find(a => a.account_id === machine.account_id);
-            if (current) setAccountName(current.account_name);
+            if (current) {
+              setAccountName(current.account_name);
+              setCurrentAccountType(current.account_type);
+            }
             setDefaultAccountId(machine.account_id);
           }
         } else {
@@ -174,6 +208,7 @@ function App() {
       if (res.ok) {
         setDefaultAccountId(account.account_id);
         setAccountName(account.account_name);
+        setCurrentAccountType(account.account_type);
         message.success(`API 계정이 '${account.account_name}'(으)로 자동 설정되었습니다.`);
         // Update current machine state to reflect change
         setCurrentMachine(payload);
@@ -237,9 +272,8 @@ function App() {
     { key: '1', label: '단 포', children: <SinglePack /> },
     { key: '2', label: '합 포', children: <MultiPack /> },
     { key: '3', label: '내 역', children: <History /> },
-    { key: '4', label: '검 수 (New)', children: <InspectionPage /> },
-    { key: '5', label: '설 정', children: <SettingsPage autoOpenMachine={autoOpenMachine} onMachineAdded={handleMachineAdded} /> },
-    { key: '6', label: 'SpeedBagger (Legacy)', children: <SpeedBaggerLegacy /> },];
+    { key: '5', label: '설 정', children: <SettingsPage autoOpenMachine={autoOpenMachine} onMachineAdded={handleMachineAdded} partnerId={defaultPartnerId} /> },
+  ];
 
   return (
     <AppContext.Provider value={{
@@ -247,18 +281,23 @@ function App() {
       accountId: defaultAccountId,
       printerMain: currentMachine?.printer_main || '',
       printerAux: currentMachine?.printer_aux || '',
-      templateId: currentMachine?.template_id || '',
-      machineId: currentMachine?.machine_id || null
+      templateId: currentMachine?.waybill_template || '',
+      machineId: currentMachine?.machine_id || null,
+      shipper_ids: currentMachine?.shipper_ids || null,
+      accountType: currentAccountType,
     }}>
       <div className="container">
         {/* 메인 탭 네비게이션 */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 10px', backgroundColor: '#f0f2f5' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            <Space>
-              {partnerName && <Tag color="blue">거래처: {partnerName}</Tag>}
-              {accountName && <Tag color="purple">API계정: {accountName}</Tag>}
-              {machineName && <Tag color="green">장비: {machineName}</Tag>}
-            </Space>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, backgroundColor: 'black', padding: '10px', borderRadius: '8px' }}>
+            <img src={logo} alt="logo" style={{ height: '40px', borderRadius: '4px' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {partnerName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{partnerName}</Tag>}
+              {accountName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{accountName}</Tag>}
+              {machineName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{machineName}</Tag>}
+              <Button type="default" onClick={() => setIsAdminModalOpen(true)} style={{ display: currentMachine?.role === '*' ? 'block' : 'none', backgroundColor: '#F26D24', color: 'white', border: 'none' }}>어드민설정</Button>
+            </div>
           </div>
           <Tabs
             activeKey={activeTab}
@@ -282,9 +321,24 @@ function App() {
           {appVersion && <span style={{ marginLeft: 'auto' }}>v{appVersion}</span>}
         </div>
 
-        {/* Account Selection Modal */}
+        <Modal
+          title="승인 필요"
+          open={isApprovalModalOpen}
+          footer={[
+            <Button key="ok" type="primary" onClick={handleQuit}>
+              확인
+            </Button>
+          ]}
+          closable={false}
+          maskClosable={false}
+          centered
+        >
+          <p>포장기 프로그램 사용을 위해서는 승인이 필요합니다</p>
+        </Modal>
+
         <Modal
           title="API 계정 선택"
+          // ...
           open={isAccountModalOpen}
           footer={null}
           closable={false} // Force selection
@@ -301,6 +355,18 @@ function App() {
               </List.Item>
             )}
           />
+        </Modal>
+
+        {/* Admin Settings Modal */}
+        <Modal
+          title="어드민 설정"
+          open={isAdminModalOpen}
+          onCancel={() => setIsAdminModalOpen(false)}
+          footer={null}
+          width={1000}
+          destroyOnClose
+        >
+          <AdminSettingsPage />
         </Modal>
       </div>
     </AppContext.Provider>

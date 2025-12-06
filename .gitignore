@@ -37,3 +37,7 @@ node_modules
 frontend/node_modules
 npm-debug.log
 yarn-error.log
+
+# Local DB
+db/
+local.db

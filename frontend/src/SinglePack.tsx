@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Button, DatePicker, Table, Input, Row, Col, Card, Typography, message } from 'antd';
+import { Button, DatePicker, Table, Input, Row, Col, Typography, message, Select } from 'antd';
+import { CloudDownloadOutlined, CloudUploadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from './config';
 import { AppContext } from './App';
@@ -7,18 +8,57 @@ import { playErrorSound, playSuccessSound } from './utils/sound';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
+const { Option } = Select;
 
 const SinglePack: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().subtract(7, 'day'), dayjs()]);
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs(), dayjs()]);
 
-  const { partnerId, accountId, printerMain, printerAux, templateId, machineId } = useContext(AppContext);
+  const [shippers, setShippers] = useState<any[]>([]);
+  const [selectedShipper, setSelectedShipper] = useState<string>('');
+
+  const { partnerId, accountId, printerMain, printerAux, templateId, machineId, shipper_ids, accountType } = useContext(AppContext);
 
   // Debug log to verify context
   useEffect(() => {
-    console.log('SinglePack Context:', { partnerId, accountId, printerMain, printerAux, templateId });
-  }, [partnerId, accountId, printerMain, printerAux, templateId]);
+    console.log('SinglePack Context:', { partnerId, accountId, printerMain, printerAux, templateId, shipper_ids });
+  }, [partnerId, accountId, printerMain, printerAux, templateId, shipper_ids]);
+
+  const fetchShippers = async () => {
+    if (!accountId) return;
+
+    // If no shipper_ids assigned, don't fetch list, just keep it empty (only 'All' will be shown)
+    if (!shipper_ids || shipper_ids.length === 0) {
+      setShippers([]);
+      setSelectedShipper('');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/shippers`);
+      if (res.ok) {
+        const allShippers: any[] = await res.json();
+        // Filter by current Account
+        let filtered = allShippers.filter(s => s.account_id === accountId);
+
+        // Filter by assigned shipper_ids
+        filtered = filtered.filter(s => shipper_ids.includes(s.shipper_id));
+
+        setShippers(filtered);
+        // Default to "All" (empty string)
+        setSelectedShipper('');
+      }
+    } catch (e) {
+      console.error("Failed to fetch shippers", e);
+    }
+  };
+
+  useEffect(() => {
+    if (accountId) {
+      fetchShippers();
+    }
+  }, [accountId, shipper_ids]);
 
   const fetchOrders = async () => {
     if (!partnerId || !accountId) {
@@ -30,12 +70,21 @@ const SinglePack: React.FC = () => {
     try {
       const start = dateRange[0].format('YYYYMMDD');
       const end = dateRange[1].format('YYYYMMDD');
-      const res = await fetch(`${API_BASE_URL}/orders/single?start_date=${start}&end_date=${end}&partner_id=${partnerId}&account_id=${accountId}`);
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to fetch orders');
+      // Use Go backend to fetch and sync to local DB
+      // @ts-ignore
+      const data = await window['go']['main']['App']['GetAndSyncOrders'](
+        API_BASE_URL,
+        partnerId,
+        accountId,
+        machineId || 0,
+        start,
+        end,
+        selectedShipper || ""
+      );
+
+      if (!data) {
+        throw new Error('Failed to fetch orders');
       }
-      const data = await res.json();
 
       // Map API data to table columns
       const mappedData = data.map((item: any, index: number) => ({
@@ -52,8 +101,10 @@ const SinglePack: React.FC = () => {
         orderNo: item.order_no,
         orderDate: item.order_ymd,
         seller: item.mall_name || item.mall_cd,
-        orderDate2: item.act_ymd, // Assuming act_ymd is orderDate2 (Balju Date)
+        orderDate2: item.collect_date, // Mapped from backend collect_date
         receiver: item.recv_name,
+        address: item.recv_addr,
+        shipperName: item.shipper_name,
         deviceName: item.device_name,
         printCount: item.print_count,
       }));
@@ -91,7 +142,8 @@ const SinglePack: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         message.success({ content: `주문 수집 완료 (${data.count}건)`, key: 'syncOrders' });
-        fetchOrders(); // Refresh list
+        // fetchOrders(); // Removed as per user request
+        setLoading(false); // Stop loading manually since fetchOrders is skipped
       } else {
         const errData = await res.json();
         throw new Error(errData.error || 'Failed to sync');
@@ -107,23 +159,26 @@ const SinglePack: React.FC = () => {
     if (partnerId && accountId) {
       fetchOrders();
     }
-  }, [dateRange, partnerId, accountId]);
+  }, [dateRange, partnerId, accountId, selectedShipper]);
 
   const columns = [
     { title: '상태', dataIndex: 'status', key: 'status', width: 60 },
     { title: 'CS상태', dataIndex: 'csStatus', key: 'csStatus', width: 80 },
-    { title: '스캔일시', dataIndex: 'scanTime', key: 'scanTime', width: 160 },
-    { title: '포장구분', dataIndex: 'packType', key: 'packType', width: 80 },
-    { title: '운송장번호', dataIndex: 'waybillNo', key: 'waybillNo', width: 150 },
+    ...(accountType === 'MULTI' ? [{ title: '화주', dataIndex: 'shipperName', key: 'shipperName', width: 120 }] : []),
+    { title: '발주일자', dataIndex: 'orderDate2', key: 'orderDate2', width: 100 },
     { title: '상품코드', dataIndex: 'productCode', key: 'productCode', width: 120 },
     { title: '상품명', dataIndex: 'productName', key: 'productName', width: 200, ellipsis: true },
     { title: '옵션명', dataIndex: 'optionName', key: 'optionName', width: 200, ellipsis: true },
+    { title: '수령인', dataIndex: 'receiver', key: 'receiver', width: 100 },
+    { title: '운송장번호', dataIndex: 'waybillNo', key: 'waybillNo', width: 150 },
+    { title: '주소', dataIndex: 'address', key: 'address', width: 150, ellipsis: true },
+    // Extra columns (not in legacy view but kept for reference)
     { title: '수량', dataIndex: 'qty', key: 'qty', width: 60 },
+    { title: '스캔일시', dataIndex: 'scanTime', key: 'scanTime', width: 160 },
+    { title: '포장구분', dataIndex: 'packType', key: 'packType', width: 80 },
     { title: '주문번호', dataIndex: 'orderNo', key: 'orderNo', width: 120 },
     { title: '주문일자', dataIndex: 'orderDate', key: 'orderDate', width: 100 },
     { title: '판매처', dataIndex: 'seller', key: 'seller', width: 100 },
-    { title: '발주일자', dataIndex: 'orderDate2', key: 'orderDate2', width: 100 },
-    { title: '수령인', dataIndex: 'receiver', key: 'receiver', width: 100 },
     { title: '장비명', dataIndex: 'deviceName', key: 'deviceName', width: 100 },
     { title: '출력횟수', dataIndex: 'printCount', key: 'printCount', width: 80 },
   ];
@@ -151,7 +206,8 @@ const SinglePack: React.FC = () => {
         partner_id: partnerId,
         account_id: accountId,
         machine_id: machineId, // Ensure machineId is passed
-        product_code: productCode
+        product_code: productCode,
+        work_type: 'ONE'
       };
       console.log("DEBUG Scan Payload:", payload);
 
@@ -242,16 +298,47 @@ const SinglePack: React.FC = () => {
               }
             }}
           />
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Button type="primary" style={{ backgroundColor: '#004d40' }}>배송처리</Button>
+          {accountType === 'MULTI' && (
+            <Select
+              allowClear
+              placeholder="화주 선택"
+              style={{ width: 150 }}
+              value={selectedShipper}
+              onChange={(value) => setSelectedShipper(value)}
+            >
+              <Option value="">화주전체</Option>
+              {shippers.map(s => (
+                <Option key={s.shipper_id} value={s.shipper_code}>{s.shipper_name}</Option>
+              ))}
+            </Select>
+          )}
           <Button
             type="primary"
-            style={{ backgroundColor: '#0000ff' }}
+            ghost
+            icon={<SearchOutlined />}
+            style={{ color: '#1E4496', borderColor: '#1E4496' }}
+            onClick={fetchOrders}
+          >
+            조회
+          </Button>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button
+            type="primary"
+            icon={<CloudDownloadOutlined />}
+            style={{ backgroundColor: '#1E4496' }}
             onClick={handleCollectOrders}
             loading={loading}
           >
             주문수집
+          </Button>
+          <Button
+            type="primary"
+            icon={<CloudUploadOutlined />}
+            style={{ backgroundColor: '#1E4496' }}
+          // onClick={handleDeliveryProcessing} // Placeholder for future action
+          >
+            배송처리
           </Button>
         </div>
       </div>
@@ -260,8 +347,7 @@ const SinglePack: React.FC = () => {
         {/* 좌측 그리드 */}
         <Col span={16} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <div style={{ marginBottom: 5, display: 'flex', justifyContent: 'space-between' }}>
-            <Text strong>작업할 내역입니다.</Text>
-            <Button type="primary" size="small" onClick={fetchOrders}>조회</Button>
+            <Text strong>작업할 내역입니다. (건수: {orders.length})</Text>
           </div>
           <Table
             dataSource={orders}

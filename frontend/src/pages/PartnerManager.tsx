@@ -76,10 +76,8 @@ const PartnerManager = () => {
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'partner_id', width: 50 },
-    { title: '거래처명', dataIndex: 'partner_name', width: 150 },
-    { title: 'API Key', dataIndex: 'partner_auth_key' },
-    { title: '사용여부', dataIndex: 'is_active', width: 80, render: (v: boolean) => v ? <Tag color="green">사용</Tag> : <Tag color="red">중지</Tag> },
+    { title: '거래처명', dataIndex: 'partner_name', key: 'partner_name' },
+    { title: '사용여부', dataIndex: 'is_active', key: 'is_active', render: (v: boolean) => v ? <Tag color="green">사용</Tag> : <Tag color="red">중지</Tag> },
     {
       title: '관리', key: 'action', width: 80,
       render: (_: any, r: Partner) => (
@@ -123,14 +121,8 @@ const PartnerManager = () => {
           <Form.Item name="partner_name" label="거래처명" rules={[{ required: true, message: '거래처명을 입력해주세요' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="partner_auth_key" label="API 인증 키" rules={[{ required: true, message: 'API 인증 키를 입력해주세요' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="template_id" label="운송장 템플릿 ID">
-            <Input />
-          </Form.Item>
-          <Form.Item name="is_active" label="사용 여부" valuePropName="checked">
-            <Switch />
+          <Form.Item name="is_active" label="사용여부" valuePropName="checked">
+            <Switch checkedChildren="Y" unCheckedChildren="N" />
           </Form.Item>
         </Form>
       </Modal>

@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+	"wails-app/internal/localdb"
 
 	"github.com/blang/semver"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
@@ -33,6 +37,9 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if err := localdb.InitDB(); err != nil {
+		fmt.Println("Failed to init local db:", err)
+	}
 }
 
 // Greet returns a greeting for the given name
@@ -159,4 +166,87 @@ func (a *App) PrintZPL(printerIP string, zplData string) string {
 	}
 
 	return "Success"
+}
+
+// GetAndSyncOrders fetches orders from server (allocating if needed) and saves to local DB
+func (a *App) GetAndSyncOrders(apiBaseURL string, partnerID, accountID, allocMachineID int, startDate, endDate, shipperCode string) ([]map[string]interface{}, error) {
+	// 1. Construct URL
+	url := fmt.Sprintf("%s/orders/single?partner_id=%d&account_id=%d&start_date=%s&end_date=%s&alloc_machine_id=%d",
+		apiBaseURL, partnerID, accountID, startDate, endDate, allocMachineID)
+
+	if shipperCode != "" {
+		url += fmt.Sprintf("&shipper_code=%s", shipperCode)
+	}
+
+	// 2. Fetch from Server
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("server error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read body: %w", err)
+	}
+
+	// 3. Parse JSON
+	var orders []map[string]interface{}
+	if err := json.Unmarshal(body, &orders); err != nil {
+		return nil, fmt.Errorf("failed to parse json: %w", err)
+	}
+
+	// 4. Save to Local DB
+	if len(orders) > 0 {
+		if err := localdb.SaveOrders(orders); err != nil {
+			fmt.Println("Failed to save to local DB:", err)
+			// Don't fail the request, just log it? Or maybe fail?
+			// User requested "download to local", so maybe warning is enough, but returning error is safer.
+			// Let's return error to alert user.
+			return nil, fmt.Errorf("failed to save to local DB: %w", err)
+		}
+	}
+
+	return orders, nil
+}
+
+// GetPrinters returns a list of available printers
+func (a *App) GetPrinters() []string {
+	var printers []string
+
+	if runtime.GOOS == "windows" {
+		// Windows: wmic printer get name
+		cmd := exec.Command("wmic", "printer", "get", "name")
+		output, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" && line != "Name" {
+					printers = append(printers, line)
+				}
+			}
+		}
+	} else {
+		// macOS/Linux: lpstat -p | awk '{print $2}'
+		// Output format: printer <name> is idle. enabled since ...
+		cmd := exec.Command("lpstat", "-p")
+		output, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 && parts[0] == "printer" {
+					printers = append(printers, parts[1])
+				}
+			}
+		}
+	}
+
+	return printers
 }

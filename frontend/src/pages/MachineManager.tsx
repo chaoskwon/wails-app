@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, Select, Switch, Space, Tag, Row, Col, Alert, Tabs, message, Tooltip } from 'antd';
-import { PlusOutlined, SettingOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, Select, Switch, Space, Tag, Row, Col, Alert, Tabs, message, Tooltip, AutoComplete } from 'antd';
+import { PlusOutlined, SettingOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
-import { Partner, Machine, ApiAccount } from '../types';
+import { Partner, Machine, ApiAccount, Shipper } from '../types';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -10,17 +10,69 @@ const { TextArea } = Input;
 interface MachineManagerProps {
   autoOpen?: boolean;
   onSuccess?: () => void;
+  defaultPartnerId?: number | null;
 }
 
-const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) => {
+const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess, defaultPartnerId }) => {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
+  const [printers, setPrinters] = useState<string[]>([]);
+  const [mainPrinterOptions, setMainPrinterOptions] = useState<{ value: string }[]>([]);
+  const [auxPrinterOptions, setAuxPrinterOptions] = useState<{ value: string }[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPartnerId, setSelectedPartnerId] = useState<number | null>(null);
   const [form] = Form.useForm();
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
   const [systemUUID, setSystemUUID] = useState<string>('');
+  const [shippers, setShippers] = useState<Shipper[]>([]);
+  const [activeTab, setActiveTab] = useState('1');
+
+  const accountId = Form.useWatch('account_id', form);
+
+  const fetchShippers = async (accId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/shippers?account_id=${accId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setShippers(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch shippers:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (accountId) {
+      fetchShippers(accountId);
+    } else {
+      setShippers([]);
+    }
+  }, [accountId]);
+
+  const handleSyncShippers = async () => {
+    if (!accountId) return;
+    try {
+      message.loading({ content: '화주 정보를 수집 중입니다...', key: 'syncShippers' });
+      const response = await fetch(`${API_BASE_URL}/shippers/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        message.success({ content: `화주 수집 완료 (${result.count}건)`, key: 'syncShippers' });
+        fetchShippers(accountId);
+      } else {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Sync failed');
+      }
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      message.error({ content: `화주 수집 실패: ${error.message}`, key: 'syncShippers' });
+    }
+  };
 
   const fetchBasicData = async () => {
     try {
@@ -47,14 +99,32 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
     return '';
   };
 
+  const fetchPrinters = async () => {
+    try {
+      // @ts-ignore
+      if (window['go'] && window['go']['main'] && window['go']['main']['App'] && window['go']['main']['App']['GetPrinters']) {
+        // @ts-ignore
+        const printerList = await window['go']['main']['App']['GetPrinters']();
+        setPrinters(printerList);
+        const options = printerList.map((p: string) => ({ value: p }));
+        setMainPrinterOptions(options);
+        setAuxPrinterOptions(options);
+      }
+    } catch (e) {
+      console.error("Failed to fetch printers", e);
+    }
+  };
+
   const fetchMachines = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/machines`);
       if (!res.ok) throw new Error('Failed to fetch machines');
       const data = await res.json();
+      console.log('data:', data);
       const formatted = data.map((m: any) => ({
         ...m,
-        is_approved: m.is_active === 'Y'
+        is_approved: m.is_active === 'Y',
+        use_inspection_bool: m.use_inspection === 'Y'
       }));
       setMachines(formatted);
     } catch (err) {
@@ -62,35 +132,57 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
     }
   };
 
+  const refreshAll = async () => {
+    await fetchBasicData();
+    await fetchMachines();
+    await fetchPrinters();
+  };
+
   useEffect(() => {
-    fetchBasicData();
-    fetchMachines();
+    refreshAll();
     fetchSystemUUID().then((uuid) => {
       if (autoOpen && uuid) {
         setEditingMachine(null);
         form.resetFields();
         form.setFieldsValue({
           machine_uuid: uuid,
-          is_approved: true
+          is_approved: true,
+          use_inspection_bool: true,
+          partner_id: defaultPartnerId // Pre-fill partner if available
         });
         setIsModalOpen(true);
       }
     });
-  }, [autoOpen]);
+
+    if (defaultPartnerId) {
+      setSelectedPartnerId(defaultPartnerId);
+    }
+  }, [autoOpen, defaultPartnerId]);
 
   const filteredMachines = machines.filter(m => m.partner_id === selectedPartnerId);
   const isRegistered = machines.some(m => m.machine_uuid === systemUUID);
 
   const handleOk = async () => {
     try {
-      const values = await form.validateFields();
+      await form.validateFields();
+      const values = form.getFieldsValue(true); // true returns all values including those in unvisited tabs
+      console.log("DEBUG handleOk values:", values);
       const payload = {
         ...values,
         is_active: values.is_approved ? 'Y' : 'N',
+        use_inspection: values.use_inspection_bool ? 'Y' : 'N',
         partner_id: Number(values.partner_id),
         account_id: values.account_id ? Number(values.account_id) : 0,
-        waybill_len: values.waybill_len ? Number(values.waybill_len) : 0
       };
+
+      // Check account type and set shipper_ids to null if not 'MULTI'
+      const selectedAccount = accounts.find(a => a.account_id === values.account_id);
+      if (selectedAccount && selectedAccount.account_type !== 'MULTI') {
+        // @ts-ignore
+        payload.shipper_ids = null;
+      }
+
+      console.log("DEBUG handleOk payload:", payload);
 
       let res;
       if (editingMachine) {
@@ -115,7 +207,7 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
 
       message.success('저장되었습니다.');
       setIsModalOpen(false);
-      fetchMachines();
+      refreshAll();
 
       if (onSuccess) {
         onSuccess();
@@ -129,18 +221,21 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
     { title: '장비명', dataIndex: 'machine_name', width: 150 },
     { title: 'UUID', dataIndex: 'machine_uuid', ellipsis: true },
     { title: '메인 프린터', dataIndex: 'printer_main' },
-    { title: '승인', dataIndex: 'is_active', width: 70, render: (v: string) => v === 'Y' ? <Tag color="blue">승인</Tag> : <Tag>미승인</Tag> },
+    { title: '사용', dataIndex: 'is_active', width: 70, render: (v: string) => v === 'Y' ? <Tag color="blue">사용</Tag> : <Tag color="red">미사용</Tag> },
     {
       title: '관리', key: 'action', width: 80,
       render: (_: any, r: any) => (
         <Button icon={<SettingOutlined />} size="small" onClick={() => {
+          fetchBasicData(); // Refresh data to get latest account types
           setEditingMachine(r);
           form.resetFields();
           form.setFieldsValue({
             ...r,
-            is_approved: r.is_active === 'Y'
+            is_approved: r.is_active === 'Y',
+            use_inspection_bool: r.use_inspection === 'Y'
           });
-          setIsModalOpen(true)
+          setIsModalOpen(true);
+          setActiveTab('1');
         }} />
       )
     }
@@ -148,20 +243,32 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
 
   const handleAdd = async () => {
     if (!selectedPartnerId) return;
+    await fetchBasicData(); // Refresh data/accounts
     setEditingMachine(null);
     form.resetFields();
 
     form.setFieldsValue({
       partner_id: selectedPartnerId,
       machine_uuid: systemUUID,
-      is_approved: true
+      is_approved: true,
+      use_inspection_bool: true
     });
     setIsModalOpen(true);
+    setActiveTab('1');
   }
 
   // Filter accounts based on selected partner in form
   const partnerIdInForm = Form.useWatch('partner_id', form);
   const filteredAccounts = accounts.filter(a => a.partner_id === partnerIdInForm);
+
+  const handlePrinterSearch = (value: string, setOptions: React.Dispatch<React.SetStateAction<{ value: string }[]>>) => {
+    const filtered = printers.filter(p => p.toUpperCase().includes(value.toUpperCase())).map(p => ({ value: p }));
+    setOptions(filtered);
+  };
+
+  const handlePrinterFocus = (setOptions: React.Dispatch<React.SetStateAction<{ value: string }[]>>) => {
+    setOptions(printers.map(p => ({ value: p })));
+  };
 
   return (
     <div>
@@ -173,12 +280,13 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
             placeholder="거래처를 선택하세요"
             onChange={setSelectedPartnerId}
             value={selectedPartnerId}
+            disabled={!!defaultPartnerId}
           >
             {partners.map(p => <Option key={p.partner_id} value={p.partner_id}>{p.partner_name}</Option>)}
           </Select>
         </Space>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={fetchMachines}>새로고침</Button>
+          <Button icon={<ReloadOutlined />} onClick={refreshAll}>새로고침</Button>
           <Tooltip title={isRegistered ? "이미 등록된 장비입니다." : ""}>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} disabled={!selectedPartnerId || isRegistered}>장비 추가</Button>
           </Tooltip>
@@ -204,20 +312,23 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
           layout="vertical"
           onValuesChange={(changed, all) => console.log('Form Change:', changed, all)}
         >
-          <Tabs defaultActiveKey="1" items={[
+          <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
             {
               key: '1', label: '기본 정보', children: (
                 <Row gutter={16}>
                   <Col span={12}>
                     <Form.Item name="partner_id" label="소속 거래처" rules={[{ required: true, message: '거래처를 선택해주세요' }]}>
-                      <Select disabled={!!selectedPartnerId && !autoOpen} placeholder="거래처 선택">
+                      <Select disabled={!!selectedPartnerId && (!autoOpen || !!defaultPartnerId)} placeholder="거래처 선택">
                         {partners.map(p => <Option key={p.partner_id} value={p.partner_id}>{p.partner_name}</Option>)}
                       </Select>
                     </Form.Item>
                     <Form.Item name="machine_name" label="장비 관리명" rules={[{ required: true, message: '장비 관리명을 입력해주세요' }]}>
                       <Input />
                     </Form.Item>
-                    <Form.Item name="is_approved" label="승인 여부" valuePropName="checked">
+                    <Form.Item name="use_inspection_bool" label="상품검수여부" valuePropName="checked">
+                      <Switch />
+                    </Form.Item>
+                    <Form.Item name="is_approved" label="사용 여부" valuePropName="checked">
                       <Switch />
                     </Form.Item>
                   </Col>
@@ -225,7 +336,10 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
                     <Form.Item name="machine_uuid" label="System UUID">
                       <Input disabled placeholder="자동 생성됨" />
                     </Form.Item>
-                    <Form.Item name="device_desc" label="장비 설명">
+                    <Form.Item name="waybill_template" label="운송장 템플릿">
+                      <Input placeholder="예: CJ_Normal.zpl" />
+                    </Form.Item>
+                    <Form.Item name="machine_desc" label="장비 설명">
                       <TextArea rows={2} />
                     </Form.Item>
                   </Col>
@@ -237,21 +351,22 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
                 <Row gutter={16}>
                   <Col span={12}>
                     <Form.Item name="printer_main" label="메인 프린터">
-                      <Input placeholder="IP 또는 드라이버명" />
-                    </Form.Item>
-                    <Form.Item name="waybill_front" label="운송장 구분">
-                      <Select>
-                        <Option value="cp">CP(일반)</Option>
-                        <Option value="kr">KR(등기)</Option>
-                      </Select>
+                      <AutoComplete
+                        options={mainPrinterOptions}
+                        onSearch={(val) => handlePrinterSearch(val, setMainPrinterOptions)}
+                        onFocus={() => handlePrinterFocus(setMainPrinterOptions)}
+                        placeholder="IP 또는 드라이버명"
+                      />
                     </Form.Item>
                   </Col>
                   <Col span={12}>
                     <Form.Item name="printer_aux" label="보조 프린터">
-                      <Input />
-                    </Form.Item>
-                    <Form.Item name="waybill_len" label="운송장 길이">
-                      <Input suffix="mm" />
+                      <AutoComplete
+                        options={auxPrinterOptions}
+                        onSearch={(val) => handlePrinterSearch(val, setAuxPrinterOptions)}
+                        onFocus={() => handlePrinterFocus(setAuxPrinterOptions)}
+                        placeholder="보조 프린터 선택"
+                      />
                     </Form.Item>
                   </Col>
                 </Row>
@@ -262,34 +377,42 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess }) 
                 <>
                   <Form.Item name="account_id" label="API 계정 연동">
                     <Select placeholder="API 계정을 선택하세요">
-                      <Option value={0}>연동 안함</Option>
                       {filteredAccounts.map(a => <Option key={a.account_id} value={a.account_id}>{a.account_name}</Option>)}
                     </Select>
                   </Form.Item>
-                  {/* Deprecated fields but keeping them if needed or hiding them? 
-                      The user wants to use account_id. 
-                      Let's keep them for now but maybe they are not needed if account is selected.
-                      Actually, let's keep them as overrides or just hide them.
-                      For now, I'll leave them as is, but the Account ID is the primary link.
-                  */}
-                  <Form.Item name="api_url" label="API URL (Override)">
-                    <Input placeholder="계정 설정 사용 시 비워두세요" />
-                  </Form.Item>
-                  <Row gutter={16}>
-                    <Col span={12}>
-                      <Form.Item name="partner_key" label="파트너키 (Override)">
-                        <Input />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="domain_key" label="도메인키 (Override)">
-                        <Input />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  <Form.Item name="supply_code" label="공급처 코드">
-                    <Input />
-                  </Form.Item>
+                  {(() => {
+                    const selectedAccount = accounts.find(a => a.account_id === accountId);
+                    const isMulti = selectedAccount?.account_type?.trim() === 'MULTI';
+                    // console.log('DEBUG: accountId', accountId);
+                    // console.log('DEBUG: all accounts', accounts);
+                    // console.log('DEBUG: selectedAccount', selectedAccount);
+                    // console.log('DEBUG: selectedAccount?.account_type', selectedAccount?.account_type);
+
+                    return accountId && isMulti && (
+                      <div style={{ marginTop: 16 }}>
+                        <div style={{ marginBottom: 8, fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>화주 정보 ({selectedAccount?.account_type})</span>
+                          <Button
+                            icon={<SyncOutlined />}
+                            size="small"
+                            onClick={handleSyncShippers}
+                          >
+                            수집
+                          </Button>
+                        </div>
+                        <Table
+                          dataSource={shippers}
+                          rowKey="shipper_id"
+                          size="small"
+                          pagination={{ pageSize: 5 }}
+                          columns={[
+                            { title: '화주코드', dataIndex: 'shipper_code', key: 'shipper_code' },
+                            { title: '화주명', dataIndex: 'shipper_name', key: 'shipper_name' },
+                          ]}
+                        />
+                      </div>
+                    );
+                  })()}
                 </>
               )
             }

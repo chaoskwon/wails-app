@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, Space, message } from 'antd';
+import { Table, Button, Modal, Form, Input, Space, message, Switch, Tag } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { Wbs } from '../types';
@@ -62,7 +62,15 @@ const WbsManager = () => {
   const columns = [
     { title: 'ID', dataIndex: 'wbs_id', width: 50 },
     { title: 'WBS 명칭', dataIndex: 'wbs_name', width: 150 },
-    { title: '설명', dataIndex: 'description' },
+    { title: '설명', dataIndex: 'wbs_desc' },
+    {
+      title: '사용', dataIndex: 'is_active', width: 80,
+      render: (val: string) => (
+        <Tag color={val === 'Y' ? 'green' : 'red'}>
+          {val === 'Y' ? '사용' : '미사용'}
+        </Tag>
+      )
+    },
     {
       title: '관리', key: 'action', width: 80,
       render: (_: any, r: any) => (
@@ -105,8 +113,18 @@ const WbsManager = () => {
           <Form.Item name="wbs_name" label="WBS 명칭" rules={[{ required: true, message: 'WBS 명칭을 입력해주세요' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="description" label="설명">
+          <Form.Item name="wbs_desc" label="설명">
             <Input />
+          </Form.Item>
+          <Form.Item
+            name="is_active"
+            label="사용여부"
+            valuePropName="checked"
+            initialValue="Y"
+            getValueProps={(value) => ({ checked: value === 'Y' })}
+            getValueFromEvent={(checked) => checked ? 'Y' : 'N'}
+          >
+            <Switch checkedChildren="사용" unCheckedChildren="미사용" />
           </Form.Item>
         </Form>
       </Modal>

@@ -1,19 +1,19 @@
 import { Partner, Wbs, ApiAccount, Shipper, Machine } from './types';
 
 export const mockPartners: Partner[] = [
-  { partner_id: 1, partner_name: '트랜쇼우', partner_auth_key: 'KEY_CP', template_id: 'ZPL_CP', is_active: true },
-  { partner_id: 2, partner_name: 'CJ 대한통운', partner_auth_key: 'KEY_CJ', template_id: 'ZPL_CJ', is_active: true },
+  { partner_id: 1, partner_name: '트랜쇼우', is_active: true },
+  { partner_id: 2, partner_name: 'CJ 대한통운', is_active: true },
 ];
 
 export const mockWbs: Wbs[] = [
-  { wbs_id: 1, wbs_name: '이지어드민', description: 'ERP' },
-  { wbs_id: 2, wbs_name: '트랜쇼우', description: 'Mall' },
+  { wbs_id: 1, wbs_name: '이지어드민', wbs_desc: 'ERP', is_active: 'Y' },
+  { wbs_id: 2, wbs_name: '트랜쇼우', wbs_desc: 'Mall', is_active: 'Y' },
 ];
 
 export const mockApiAccounts: ApiAccount[] = [
-  { account_id: 1, partner_id: 1, wbs_id: 1, account_name: '트랜쇼우-이지어드민', api_url: 'https://api.sabang.net', domain_key: 'SB_KEY_01', mapping_config: '{}' },
-  { account_id: 2, partner_id: 1, wbs_id: 2, account_name: '트랜쇼우-트랜쇼우', api_url: 'https://api.cafe24.com', domain_key: 'C24_KEY_01', mapping_config: '{}' },
-  { account_id: 3, partner_id: 2, wbs_id: 1, account_name: '사방넷-물류팀', api_url: 'https://api.sabang.net', domain_key: 'SB_KEY_02', mapping_config: '{}' },
+  { account_id: 1, partner_id: 1, wbs_id: 1, account_name: '트랜쇼우-이지어드민', api_url: 'https://api.sabang.net', partner_key: 'PARTNER_KEY_01', domain_key: 'SB_KEY_01', account_type: 'ONE', is_active: 'Y' },
+  { account_id: 2, partner_id: 1, wbs_id: 2, account_name: '트랜쇼우-트랜쇼우', api_url: 'https://api.cafe24.com', partner_key: 'PARTNER_KEY_02', domain_key: 'C24_KEY_01', account_type: 'ONE', is_active: 'Y' },
+  { account_id: 3, partner_id: 2, wbs_id: 1, account_name: '사방넷-물류팀', api_url: 'https://api.sabang.net', partner_key: 'PARTNER_KEY_03', domain_key: 'SB_KEY_02', account_type: 'MULTI', is_active: 'Y' },
 ];
 
 export const mockShippers: Shipper[] = [

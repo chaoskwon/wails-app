@@ -1,15 +1,14 @@
 export interface Partner {
   partner_id: number;
   partner_name: string;
-  partner_auth_key: string;
-  template_id: string;
   is_active: boolean;
 }
 
 export interface Wbs {
   wbs_id: number;
   wbs_name: string;
-  description: string;
+  wbs_desc: string;
+  is_active: string;
 }
 
 export interface ApiAccount {
@@ -18,8 +17,10 @@ export interface ApiAccount {
   wbs_id: number;
   account_name: string;
   api_url: string;
+  partner_key: string;
   domain_key: string;
-  mapping_config: string;
+  account_type: string;
+  is_active: string;
 }
 
 export interface Shipper {
@@ -28,6 +29,11 @@ export interface Shipper {
   account_id: number;
   shipper_code: string;
   shipper_name: string;
+}
+
+export interface Printer {
+  name: string;
+  is_default: boolean;
 }
 
 export interface Machine {
@@ -40,11 +46,51 @@ export interface Machine {
   printer_aux: string;
   is_approved: boolean;
   api_url?: string;
-  supply_code?: string;
-  device_desc?: string;
-  partner_key?: string;
-  domain_key?: string;
-  waybill_front?: string;
-  waybill_len?: string;
+  machine_desc?: string;
   role?: string;
+  use_inspection?: string;
+  shipper_ids?: number[];
+  waybill_template?: string;
+  is_active?: string;
+}
+
+export interface CustomerOrder {
+  order_id: number;
+  partner_id: number;
+  account_id: number;
+  mall_cd: string;
+  order_no: string;
+  order_no1?: string;
+  order_no2?: string;
+  order_ymd: string;
+  kind: string;
+  shipper_code?: string;
+  shipper_name?: string;
+  send_name: string;
+  recv_name: string;
+  recv_cell: string;
+  recv_addr: string;
+  product_cd: string;
+  product_name: string;
+  order_qty: number;
+  product_option: string;
+  order_date: string;
+  barcode: string;
+  work_date: string;
+  waybill_no: string;
+  wave_no: string;
+  print_count: number;
+  work_flag: string;
+  cancel_flag: string;
+}
+
+export interface PackingHistory {
+  history_id: number;
+  order_id: number;
+  machine_id: number;
+  work_type: string;
+  scan_value: string;
+  waybill_no: string;
+  result_status: string;
+  created_at: string;
 }
