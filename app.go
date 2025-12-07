@@ -250,3 +250,21 @@ func (a *App) GetPrinters() []string {
 
 	return printers
 }
+
+// WaybillValidationResult is the return type for ValidateWaybill
+type WaybillValidationResult struct {
+	OrderID   int64  `json:"order_id"`
+	WaybillNo string `json:"waybill_no"`
+}
+
+// ValidateWaybill checks if the waybill or product exists in the local DB
+func (a *App) ValidateWaybill(packingType string, val string, partnerId int, accountId int) (*WaybillValidationResult, error) {
+	orderId, waybillNo, err := localdb.GetOrderIdByInputData(packingType, val, partnerId, accountId)
+	if err != nil {
+		return nil, err
+	}
+	return &WaybillValidationResult{
+		OrderID:   orderId,
+		WaybillNo: waybillNo,
+	}, nil
+}

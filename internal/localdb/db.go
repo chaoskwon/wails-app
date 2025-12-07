@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"strings"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -165,4 +167,60 @@ func GetOrders() ([]map[string]interface{}, error) {
 		result = append(result, m)
 	}
 	return result, nil
+}
+
+// GetOrderIdByInputData retrieves a single order by product code
+func GetOrderIdByInputData(packingType string, val string, partnerId int, accountId int) (int64, string, error) {
+	if DB == nil {
+		return 0, "", fmt.Errorf("local db not initialized")
+	}
+
+	query := ""
+	switch packingType {
+	case "ONE":
+		query = "SELECT order_id, waybill_no FROM customer_order WHERE work_flag = '0' AND product_cd = ? AND partner_id = ? AND account_id = ? LIMIT 1"
+	case "MULTI":
+		query = "SELECT order_id, waybill_no FROM customer_order WHERE work_flag = '0' AND waybill_no = ? AND partner_id = ? AND account_id = ? LIMIT 1"
+	default:
+		return 0, "", fmt.Errorf("invalid packing type: %s", packingType)
+	}
+
+	fmt.Println("sqlite query:", debugSql(query, val, partnerId, accountId))
+
+	rows, err := DB.Query(query, val, partnerId, accountId)
+	if err != nil {
+		fmt.Println("sqlite query error:", err)
+		return 0, "", err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if packingType == "ONE" {
+			fmt.Println("sqlite error:no data")
+			return 0, "", fmt.Errorf("작업할 상품이 없습니다")
+		}
+		return 0, "", nil
+	}
+
+	if packingType == "MULTI" {
+		return 0, "", fmt.Errorf("단포 운송장 입니다")
+	}
+
+	var orderId int64
+	var waybillNo string
+	if err := rows.Scan(&orderId, &waybillNo); err != nil {
+		fmt.Println("sqlite scan error:", err)
+		return 0, "", err
+	}
+
+	fmt.Println("sqlite result:", orderId, waybillNo)
+	return orderId, waybillNo, nil
+}
+
+func debugSql(query string, args ...interface{}) string {
+	for _, arg := range args {
+		val := fmt.Sprintf("'%v'", arg)
+		query = strings.Replace(query, "?", val, 1)
+	}
+	return query
 }

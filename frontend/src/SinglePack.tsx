@@ -197,17 +197,43 @@ const SinglePack: React.FC = () => {
 
       if (!partnerId || !accountId) {
         message.warning('API 계정이 선택되지 않았습니다.');
+        playErrorSound();
         return;
       }
 
       const inputElement = e.currentTarget; // Capture reference
 
+      // Validate Waybill locally first
+      let orderId = 0;
+      let waybillNo = "";
+      try {
+        // @ts-ignore
+        const result = await window['go']['main']['App']['ValidateWaybill']('ONE', productCode, partnerId, accountId);
+        if (result) {
+          orderId = result.order_id;
+          waybillNo = result.waybill_no;
+        }
+
+        console.log("ValidateWaybill result:", result);
+        // If ValidateWaybill returns nil or empty orderId, treat as failure
+        if (!orderId || orderId === 0) {
+          throw new Error("운송장 정보를 찾을 수 없습니다.");
+        }
+      } catch (err: any) {
+        console.error("Validation failed:", err);
+        // Display the error message from the backend or a default one
+        message.error(err.message || "상품 검증 실패");
+        playErrorSound();
+        if (inputElement) {
+          inputElement.value = '';
+        }
+        return; // Stop processing
+      }
+
       const payload = {
-        partner_id: partnerId,
-        account_id: accountId,
-        machine_id: machineId, // Ensure machineId is passed
-        product_code: productCode,
-        work_type: 'ONE'
+        "order_id": orderId,
+        "waybill_no": waybillNo,
+        "packing_type": "ONE"
       };
       console.log("DEBUG Scan Payload:", payload);
 
