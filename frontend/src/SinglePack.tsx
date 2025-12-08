@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Button, DatePicker, Table, Input, Row, Col, Typography, message, Select } from 'antd';
-import { CloudDownloadOutlined, CloudUploadOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, DatePicker, Table, Input, Row, Col, Typography, message, Select, Tag } from 'antd';
+import { CloudDownloadOutlined, CloudUploadOutlined, SearchOutlined, WifiOutlined, DisconnectOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from './config';
 import { AppContext } from './App';
@@ -14,39 +14,49 @@ const SinglePack: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs(), dayjs()]);
+  const [isOnline, setIsOnline] = useState(false);
 
   const [shippers, setShippers] = useState<any[]>([]);
   const [selectedShipper, setSelectedShipper] = useState<string>('');
 
   const { partnerId, accountId, printerMain, printerAux, templateId, machineId, shipper_ids, accountType } = useContext(AppContext);
 
-  // Debug log to verify context
+  // Debug log
   useEffect(() => {
     console.log('SinglePack Context:', { partnerId, accountId, printerMain, printerAux, templateId, shipper_ids });
   }, [partnerId, accountId, printerMain, printerAux, templateId, shipper_ids]);
 
+  // Connect WebSocket
+  useEffect(() => {
+    const wsUrl = API_BASE_URL.replace("http", "ws") + "/ws";
+    // @ts-ignore
+    window['go']['main']['App']['ConnectWebSocket'](wsUrl).then((res: string) => {
+      if (res === "Connected") {
+        setIsOnline(true);
+        message.success("서버에 연결되었습니다.");
+      } else {
+        setIsOnline(false);
+        message.error("서버 연결 실패: " + res);
+      }
+    });
+
+    // Optional: connection check loop, but Go handles keepalive
+  }, []);
+
   const fetchShippers = async () => {
     if (!accountId) return;
-
-    // If no shipper_ids assigned, don't fetch list, just keep it empty (only 'All' will be shown)
     if (!shipper_ids || shipper_ids.length === 0) {
       setShippers([]);
       setSelectedShipper('');
       return;
     }
-
     try {
       const res = await fetch(`${API_BASE_URL}/shippers`);
       if (res.ok) {
         const allShippers: any[] = await res.json();
-        // Filter by current Account
         let filtered = allShippers.filter(s => s.account_id === accountId);
-
-        // Filter by assigned shipper_ids
         filtered = filtered.filter(s => shipper_ids.includes(s.shipper_id));
-
         setShippers(filtered);
-        // Default to "All" (empty string)
         setSelectedShipper('');
       }
     } catch (e) {
@@ -61,32 +71,29 @@ const SinglePack: React.FC = () => {
   }, [accountId, shipper_ids]);
 
   const fetchOrders = async () => {
-    if (!partnerId || !accountId) {
-      // Don't fetch if context is not ready
-      return;
-    }
+    if (!partnerId || !accountId) return;
 
     setLoading(true);
     try {
       const start = dateRange[0].format('YYYYMMDD');
       const end = dateRange[1].format('YYYYMMDD');
-      // Use Go backend to fetch and sync to local DB
-      // @ts-ignore
-      const data = await window['go']['main']['App']['GetAndSyncOrders'](
-        API_BASE_URL,
-        partnerId,
-        accountId,
-        machineId || 0,
-        start,
-        end,
-        selectedShipper || ""
-      );
 
-      if (!data) {
-        throw new Error('Failed to fetch orders');
+      let url = `${API_BASE_URL}/orders/single?partner_id=${partnerId}&account_id=${accountId}&start_date=${start}&end_date=${end}&alloc_machine_id=${machineId || 0}`;
+      if (selectedShipper) {
+        url += `&shipper_code=${selectedShipper}`;
       }
 
-      // Map API data to table columns
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error("Failed to fetch orders");
+      }
+      const data = await res.json();
+
+      if (!data) {
+        setOrders([]);
+        return;
+      }
+
       const mappedData = data.map((item: any, index: number) => ({
         key: item.order_id || index,
         status: item.result_status || '대기',
@@ -101,7 +108,7 @@ const SinglePack: React.FC = () => {
         orderNo: item.order_no,
         orderDate: item.order_ymd,
         seller: item.mall_name || item.mall_cd,
-        orderDate2: item.collect_date, // Mapped from backend collect_date
+        orderDate2: item.collect_date,
         receiver: item.recv_name,
         address: item.recv_addr,
         shipperName: item.shipper_name,
@@ -113,44 +120,6 @@ const SinglePack: React.FC = () => {
       console.error(err);
       message.error('주문 목록을 불러오는데 실패했습니다.');
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCollectOrders = async () => {
-    if (!partnerId || !accountId) {
-      message.warning('API 계정이 선택되지 않았습니다. 설정을 확인해주세요.');
-      return;
-    }
-
-    setLoading(true);
-    message.loading({ content: '주문을 수집하는 중...', key: 'syncOrders' });
-    try {
-      const start = dateRange[0].format('YYYY-MM-DD');
-      const end = dateRange[1].format('YYYY-MM-DD');
-
-      const res = await fetch(`${API_BASE_URL}/orders/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          account_id: accountId,
-          start_date: start,
-          end_date: end
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        message.success({ content: `주문 수집 완료 (${data.count}건)`, key: 'syncOrders' });
-        // fetchOrders(); // Removed as per user request
-        setLoading(false); // Stop loading manually since fetchOrders is skipped
-      } else {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to sync');
-      }
-    } catch (e: any) {
-      console.error(e);
-      message.error({ content: `주문 수집 실패: ${e.message}`, key: 'syncOrders' });
       setLoading(false);
     }
   };
@@ -172,7 +141,6 @@ const SinglePack: React.FC = () => {
     { title: '수령인', dataIndex: 'receiver', key: 'receiver', width: 100 },
     { title: '운송장번호', dataIndex: 'waybillNo', key: 'waybillNo', width: 150 },
     { title: '주소', dataIndex: 'address', key: 'address', width: 150, ellipsis: true },
-    // Extra columns (not in legacy view but kept for reference)
     { title: '수량', dataIndex: 'qty', key: 'qty', width: 60 },
     { title: '스캔일시', dataIndex: 'scanTime', key: 'scanTime', width: 160 },
     { title: '포장구분', dataIndex: 'packType', key: 'packType', width: 80 },
@@ -201,109 +169,61 @@ const SinglePack: React.FC = () => {
         return;
       }
 
-      const inputElement = e.currentTarget; // Capture reference
+      const inputElement = e.currentTarget;
 
-      // Validate Waybill locally first
-      let orderId = 0;
-      let waybillNo = "";
       try {
+        // WebSocket Scan
         // @ts-ignore
-        const result = await window['go']['main']['App']['ValidateWaybill']('ONE', productCode, partnerId, accountId);
-        if (result) {
-          orderId = result.order_id;
-          waybillNo = result.waybill_no;
-        }
+        const result = await window['go']['main']['App']['ScanBarcodeWS'](
+          productCode,
+          machineId || 0,
+          "ONE"
+        );
 
-        console.log("ValidateWaybill result:", result);
-        // If ValidateWaybill returns nil or empty orderId, treat as failure
-        if (!orderId || orderId === 0) {
-          throw new Error("운송장 정보를 찾을 수 없습니다.");
-        }
-      } catch (err: any) {
-        console.error("Validation failed:", err);
-        // Display the error message from the backend or a default one
-        message.error(err.message || "상품 검증 실패");
-        playErrorSound();
-        if (inputElement) {
-          inputElement.value = '';
-        }
-        return; // Stop processing
-      }
+        console.log("Scan Result:", result);
 
-      const payload = {
-        "order_id": orderId,
-        "waybill_no": waybillNo,
-        "packing_type": "ONE"
-      };
-      console.log("DEBUG Scan Payload:", payload);
-
-      try {
-        const res = await fetch(`${API_BASE_URL}/orders/scan`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          const data = await res.json();
+        if (result.success) {
           setScanResult({
             status: 'success',
-            waybillNo: data.waybill_no,
-            productName: data.product_name
+            waybillNo: result.waybill_no,
+            productName: result.product_name
           });
 
-          // Print ZPL if available
-          console.log(`DEBUG Scan Result: ZPL=${data.zpl_string ? 'YES' : 'NO'}, Printer=${printerMain}`);
-
-          if (data.zpl_string && printerMain) {
+          // Print ZPL if exists
+          if (result.zpl_string && printerMain) {
             try {
               // @ts-ignore
-              const result = await window['go']['main']['App']['PrintZPL'](printerMain, data.zpl_string);
-              if (result !== "Success") {
-                message.error(`프린터 출력 실패: ${result}`);
+              const printRes = await window['go']['main']['App']['PrintZPL'](printerMain, result.zpl_string);
+              if (printRes !== "Success") {
+                message.error(`프린터 출력 실패: ${printRes}`);
                 playErrorSound();
               } else {
                 message.success("운송장 출력 완료");
                 playSuccessSound();
               }
-            } catch (e) {
-              console.error("Print failed", e);
+            } catch (pe) {
+              console.error("Print Error:", pe);
               message.error("프린터 통신 오류");
               playErrorSound();
             }
           } else {
-            if (!data.zpl_string) {
-              console.warn("ZPL string is empty");
-              // Optional: message.warning("운송장 데이터가 없습니다.");
-            }
-            if (!printerMain) {
-              message.warning("메인 프린터가 설정되지 않았습니다.");
-              playErrorSound();
-            }
-            // If success but no print needed, just success sound
-            if (data.zpl_string && !printerMain) {
-              // Already handled above
-            } else if (!data.zpl_string) {
-              playSuccessSound();
-            }
+            playSuccessSound();
           }
-
         } else {
-          const errData = await res.json();
-          setScanResult({
-            status: 'error',
-            message: errData.error || 'Scan Failed'
-          });
-          // Play error sound
-          playErrorSound();
+          throw new Error(result.message);
         }
-      } catch (err) {
-        console.error(err);
-        setScanResult({ status: 'error', message: 'Network Error' });
+
+      } catch (err: any) {
+        console.error("Scan Failed:", err);
+        setScanResult({
+          status: 'error',
+          message: err.message || 'Scan Failed'
+        });
+        message.error(err.message || "스캔 실패");
         playErrorSound();
       } finally {
         if (inputElement) {
-          inputElement.value = ''; // Use captured reference
+          inputElement.value = '';
         }
       }
     }
@@ -347,22 +267,19 @@ const SinglePack: React.FC = () => {
           >
             조회
           </Button>
+          {isOnline ? (
+            <Tag icon={<WifiOutlined />} color="success">Online</Tag>
+          ) : (
+            <Tag icon={<DisconnectOutlined />} color="error">Offline</Tag>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <Button
-            type="primary"
-            icon={<CloudDownloadOutlined />}
-            style={{ backgroundColor: '#1E4496' }}
-            onClick={handleCollectOrders}
-            loading={loading}
-          >
-            주문수집
-          </Button>
+          {/* Removed Sync Button as it is real-time now */}
           <Button
             type="primary"
             icon={<CloudUploadOutlined />}
             style={{ backgroundColor: '#1E4496' }}
-          // onClick={handleDeliveryProcessing} // Placeholder for future action
+            disabled
           >
             배송처리
           </Button>

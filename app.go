@@ -2,44 +2,66 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-	"wails-app/internal/localdb"
 
 	"github.com/blang/semver"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
 )
 
-var Version = "0.1.0"
+var Version = "1.0.0"
 
 // App struct
 type App struct {
 	ctx         context.Context
 	printerConn net.Conn
 	printLock   sync.Mutex
+
+	// WebSocket
+	wsConn      *websocket.Conn
+	wsLock      sync.Mutex
+	wsRequests  map[string]chan ScanResponseData
+	wsReqLock   sync.Mutex
+	isConnected bool
+}
+
+// WSMessage structure (same as backend)
+type WSMessage struct {
+	Type      string      `json:"type"`
+	RequestID string      `json:"request_id"`
+	Data      interface{} `json:"data"`
+}
+
+// ScanResponseData structure (same as backend)
+type ScanResponseData struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	OrderNo     string `json:"order_no"`
+	ProductName string `json:"product_name"`
+	WaybillNo   string `json:"waybill_no"`
+	InvoiceURL  string `json:"invoice_url"`
+	ZPLString   string `json:"zpl_string"`
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		wsRequests: make(map[string]chan ScanResponseData),
+	}
 }
 
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	if err := localdb.InitDB(); err != nil {
-		fmt.Println("Failed to init local db:", err)
-	}
 }
 
 // Greet returns a greeting for the given name
@@ -168,53 +190,6 @@ func (a *App) PrintZPL(printerIP string, zplData string) string {
 	return "Success"
 }
 
-// GetAndSyncOrders fetches orders from server (allocating if needed) and saves to local DB
-func (a *App) GetAndSyncOrders(apiBaseURL string, partnerID, accountID, allocMachineID int, startDate, endDate, shipperCode string) ([]map[string]interface{}, error) {
-	// 1. Construct URL
-	url := fmt.Sprintf("%s/orders/single?partner_id=%d&account_id=%d&start_date=%s&end_date=%s&alloc_machine_id=%d",
-		apiBaseURL, partnerID, accountID, startDate, endDate, allocMachineID)
-
-	if shipperCode != "" {
-		url += fmt.Sprintf("&shipper_code=%s", shipperCode)
-	}
-
-	// 2. Fetch from Server
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch from server: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read body: %w", err)
-	}
-
-	// 3. Parse JSON
-	var orders []map[string]interface{}
-	if err := json.Unmarshal(body, &orders); err != nil {
-		return nil, fmt.Errorf("failed to parse json: %w", err)
-	}
-
-	// 4. Save to Local DB
-	if len(orders) > 0 {
-		if err := localdb.SaveOrders(orders); err != nil {
-			fmt.Println("Failed to save to local DB:", err)
-			// Don't fail the request, just log it? Or maybe fail?
-			// User requested "download to local", so maybe warning is enough, but returning error is safer.
-			// Let's return error to alert user.
-			return nil, fmt.Errorf("failed to save to local DB: %w", err)
-		}
-	}
-
-	return orders, nil
-}
-
 // GetPrinters returns a list of available printers
 func (a *App) GetPrinters() []string {
 	var printers []string
@@ -251,20 +226,128 @@ func (a *App) GetPrinters() []string {
 	return printers
 }
 
-// WaybillValidationResult is the return type for ValidateWaybill
-type WaybillValidationResult struct {
-	OrderID   int64  `json:"order_id"`
-	WaybillNo string `json:"waybill_no"`
+// WebSocket Implementation
+
+func (a *App) ConnectWebSocket(url string) string {
+	a.wsLock.Lock()
+	defer a.wsLock.Unlock()
+
+	if a.wsConn != nil {
+		a.wsConn.Close()
+	}
+
+	c, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		a.isConnected = false
+		return fmt.Sprintf("Error connecting: %v", err)
+	}
+
+	a.wsConn = c
+	a.isConnected = true
+
+	// Start reading loop
+	go a.readLoop()
+
+	return "Connected"
 }
 
-// ValidateWaybill checks if the waybill or product exists in the local DB
-func (a *App) ValidateWaybill(packingType string, val string, partnerId int, accountId int) (*WaybillValidationResult, error) {
-	orderId, waybillNo, err := localdb.GetOrderIdByInputData(packingType, val, partnerId, accountId)
+func (a *App) readLoop() {
+	defer func() {
+		a.wsLock.Lock()
+		if a.wsConn != nil {
+			a.wsConn.Close()
+			a.wsConn = nil
+		}
+		a.isConnected = false
+		a.wsLock.Unlock()
+	}()
+
+	for {
+		var msg WSMessage
+		// Use a temporary variable to hold the connection to avoid holding the lock during ReadJSON
+		a.wsLock.Lock()
+		conn := a.wsConn
+		a.wsLock.Unlock()
+
+		if conn == nil {
+			break
+		}
+
+		err := conn.ReadJSON(&msg)
+		if err != nil {
+			fmt.Println("read error:", err)
+			break
+		}
+
+		// Handle Scan Result
+		if msg.Type == "SCAN_RESULT" {
+			dataMap, ok := msg.Data.(map[string]interface{})
+			if ok {
+				// Convert map to ScanResponseData
+				resp := ScanResponseData{
+					Success:     dataMap["success"].(bool),
+					Message:     dataMap["message"].(string),
+					OrderNo:     dataMap["order_no"].(string),
+					ProductName: dataMap["product_name"].(string),
+					WaybillNo:   dataMap["waybill_no"].(string),
+					InvoiceURL:  dataMap["invoice_url"].(string),
+					ZPLString:   dataMap["zpl_string"].(string),
+				}
+
+				a.wsReqLock.Lock()
+				if ch, exists := a.wsRequests[msg.RequestID]; exists {
+					ch <- resp
+					delete(a.wsRequests, msg.RequestID)
+				}
+				a.wsReqLock.Unlock()
+			}
+		}
+	}
+}
+
+func (a *App) ScanBarcodeWS(waybillNo string, machineID int, packingType string) (*ScanResponseData, error) {
+	if !a.isConnected {
+		return nil, fmt.Errorf("not connected to server")
+	}
+
+	reqID := uuid.New().String()
+	ch := make(chan ScanResponseData, 1)
+
+	a.wsReqLock.Lock()
+	a.wsRequests[reqID] = ch
+	a.wsReqLock.Unlock()
+
+	reqData := map[string]interface{}{
+		"waybill_no":   waybillNo,
+		"machine_id":   machineID,
+		"packing_type": packingType,
+	}
+
+	msg := WSMessage{
+		Type:      "SCAN",
+		RequestID: reqID,
+		Data:      reqData,
+	}
+
+	a.wsLock.Lock()
+	if a.wsConn == nil {
+		a.wsLock.Unlock()
+		return nil, fmt.Errorf("connection lost")
+	}
+	err := a.wsConn.WriteJSON(msg)
+	a.wsLock.Unlock()
+
 	if err != nil {
 		return nil, err
 	}
-	return &WaybillValidationResult{
-		OrderID:   orderId,
-		WaybillNo: waybillNo,
-	}, nil
+
+	select {
+	case res := <-ch:
+		return &res, nil
+	case <-time.After(5 * time.Second): // Timeout
+		a.wsReqLock.Lock()
+		delete(a.wsRequests, reqID)
+		a.wsReqLock.Unlock()
+		return nil, fmt.Errorf("request timed out")
+	}
 }

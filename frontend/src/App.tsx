@@ -5,7 +5,6 @@ import { Tabs, message, Tag, Space, Modal, List, Button } from 'antd';
 import SinglePack from './SinglePack';
 import MultiPack from './MultiPack';
 import History from './History';
-import InspectionPage from './InspectionPage';
 import SettingsPage from './SettingsPage';
 import { API_BASE_URL } from './config';
 import { ApiAccount } from './types';
@@ -45,12 +44,10 @@ function App() {
   const [defaultPartnerId, setDefaultPartnerId] = useState<number | null>(null);
   const [defaultAccountId, setDefaultAccountId] = useState<number | null>(null);
   const [currentAccountType, setCurrentAccountType] = useState<string>('');
-
-  // Account Selection Modal State
-  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
-  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [availableAccounts, setAvailableAccounts] = useState<ApiAccount[]>([]);
   const [currentMachine, setCurrentMachine] = useState<any>(null);
+
+  // Modal State
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
   const handleQuit = () => {
@@ -58,11 +55,9 @@ function App() {
   };
 
   useEffect(() => {
-    checkRegistration();
-    checkForUpdates();
-    checkRegistration();
-    checkForUpdates();
     fetchVersion();
+    checkForUpdates();
+    checkRegistration();
   }, []);
 
   const fetchVersion = async () => {
@@ -154,69 +149,16 @@ function App() {
           }
         }
 
-        // 2. Fallback: Auto-select if only one, or show modal
-        if (partnerAccounts.length === 1) {
-          // Only one account: Auto-select
-          const account = partnerAccounts[0];
-          if (machine.account_id !== account.account_id) {
-            // Update DB if different
-            await updateMachineAccount(machine, account);
-          } else {
-            // Just set state
-            setDefaultAccountId(account.account_id);
-            setAccountName(account.account_name);
-            setCurrentAccountType(account.account_type);
-            message.success(`API 계정 '${account.account_name}'이(가) 자동 선택되었습니다.`);
-          }
-        } else if (partnerAccounts.length > 1) {
-          // Multiple accounts: Show Modal (Every time at startup)
-          setAvailableAccounts(partnerAccounts);
-          setIsAccountModalOpen(true);
-
-          // If already set, we can show it as current, but we still force selection/confirmation
-          if (machine.account_id) {
-            const current = partnerAccounts.find(a => a.account_id === machine.account_id);
-            if (current) {
-              setAccountName(current.account_name);
-              setCurrentAccountType(current.account_type);
-            }
-            setDefaultAccountId(machine.account_id);
-          }
-        } else {
-          // No accounts
-          message.warning('해당 거래처에 등록된 API 계정이 없습니다.');
-        }
+        // 2. Fallback: Go to Settings
+        message.warning('API 계정이 설정되지 않았습니다. 설정 페이지로 이동합니다.');
+        setActiveTab('5');
       }
     } catch (e) {
       console.error("Failed to check startup accounts", e);
     }
   };
 
-  const updateMachineAccount = async (machine: any, account: ApiAccount) => {
-    try {
-      const payload = {
-        ...machine,
-        account_id: account.account_id,
-      };
 
-      const res = await fetch(`${API_BASE_URL}/machines/${machine.machine_id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        setDefaultAccountId(account.account_id);
-        setAccountName(account.account_name);
-        setCurrentAccountType(account.account_type);
-        message.success(`API 계정이 '${account.account_name}'(으)로 자동 설정되었습니다.`);
-        // Update current machine state to reflect change
-        setCurrentMachine(payload);
-      }
-    } catch (e) {
-      console.error("Failed to auto-update machine account", e);
-    }
-  };
 
   const fetchPartnerName = async (partnerId: number) => {
     try {
@@ -228,30 +170,6 @@ function App() {
     } catch (e) {
       console.error("Failed to fetch partner", e);
     }
-  };
-
-  const fetchAccountName = async (accountId: number) => {
-    // This might be redundant if handleStartupAccountCheck handles it, 
-    // but useful if we skip startup check logic (e.g. machine update).
-    // Keeping it for safety or other calls.
-    try {
-      const res = await fetch(`${API_BASE_URL}/accounts`);
-      if (res.ok) {
-        const accounts: any[] = await res.json();
-        const account = accounts.find(a => a.account_id === accountId);
-        if (account) {
-          setAccountName(account.account_name);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to fetch account", e);
-    }
-  };
-
-  const handleAccountSelect = async (account: ApiAccount) => {
-    if (!currentMachine) return;
-    await updateMachineAccount(currentMachine, account);
-    setIsAccountModalOpen(false);
   };
 
   const handleMachineAdded = () => {
@@ -334,27 +252,6 @@ function App() {
           centered
         >
           <p>포장기 프로그램 사용을 위해서는 승인이 필요합니다</p>
-        </Modal>
-
-        <Modal
-          title="API 계정 선택"
-          // ...
-          open={isAccountModalOpen}
-          footer={null}
-          closable={false} // Force selection
-          maskClosable={false}
-        >
-          <p>이 장비에 연결할 API 계정을 선택해주세요.</p>
-          <List
-            dataSource={availableAccounts}
-            renderItem={(item) => (
-              <List.Item>
-                <Button block onClick={() => handleAccountSelect(item)}>
-                  {item.account_name} ({item.api_url})
-                </Button>
-              </List.Item>
-            )}
-          />
         </Modal>
 
         {/* Admin Settings Modal */}

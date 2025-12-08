@@ -6,7 +6,8 @@ require github.com/wailsapp/wails/v2 v2.11.0
 
 require (
 	github.com/blang/semver v3.5.1+incompatible
-	github.com/mattn/go-sqlite3 v1.14.32
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/rhysd/go-github-selfupdate v1.2.3
 )
 
@@ -17,8 +18,6 @@ require (
 	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/google/go-github/v30 v30.1.0 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/labstack/echo/v4 v4.13.3 // indirect
