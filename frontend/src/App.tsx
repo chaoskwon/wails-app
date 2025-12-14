@@ -1,7 +1,8 @@
-import { useState, useEffect, createContext } from 'react';
+import React, { useState, useEffect, createContext } from 'react';
 import './App.css';
 import logo from './assets/images/logo_white.jpeg';
 import { Tabs, message, Tag, Space, Modal, List, Button } from 'antd';
+import { EventsOn } from "../wailsjs/runtime/runtime";
 import SinglePack from './SinglePack';
 import MultiPack from './MultiPack';
 import History from './History';
@@ -21,6 +22,8 @@ export const AppContext = createContext<{
   machineId: number | null;
   shipper_ids: number[] | null;
   accountType: string;
+  isOnline: boolean;
+  setIsOnline: (status: boolean) => void;
 }>({
   partnerId: null,
   accountId: null,
@@ -29,7 +32,9 @@ export const AppContext = createContext<{
   templateId: '',
   machineId: null,
   shipper_ids: null,
-  accountType: ''
+  accountType: '',
+  isOnline: false,
+  setIsOnline: () => { },
 });
 
 function App() {
@@ -46,6 +51,9 @@ function App() {
   const [currentAccountType, setCurrentAccountType] = useState<string>('');
   const [currentMachine, setCurrentMachine] = useState<any>(null);
 
+  // Connection State
+  const [isOnline, setIsOnline] = useState(false);
+
   // Modal State
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
@@ -58,6 +66,55 @@ function App() {
     fetchVersion();
     checkForUpdates();
     checkRegistration();
+  }, []);
+
+  // Connect WebSocket with Auto-Reconnect
+  const isOnlineRef = React.useRef(false);
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  useEffect(() => {
+    const wsUrl = API_BASE_URL.replace("http", "ws") + "/ws";
+
+    const connect = () => {
+      if (isOnlineRef.current) return;
+
+      // @ts-ignore
+      window['go']['main']['App']['ConnectWebSocket'](wsUrl).then((res: string) => {
+        if (res === "Connected") {
+          setIsOnline(true);
+          isOnlineRef.current = true;
+        } else {
+          setIsOnline(false);
+          isOnlineRef.current = false;
+          console.log("WS Connect Failed:", res);
+        }
+      }).catch((err: any) => {
+        console.error("WS Connect Error:", err);
+        setIsOnline(false);
+        isOnlineRef.current = false;
+      });
+    };
+
+    connect();
+
+    // Listen for disconnect event from Backend (Server-side close)
+    EventsOn("ws:disconnect", () => {
+      console.log("Received ws:disconnect event!");
+      setIsOnline(false);
+      isOnlineRef.current = false;
+    });
+
+    const interval = setInterval(() => {
+      if (!isOnlineRef.current) {
+        console.log("Auto-reconnecting WS...");
+        connect();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const fetchVersion = async () => {
@@ -148,7 +205,6 @@ function App() {
             return; // Skip modal
           }
         }
-
         // 2. Fallback: Go to Settings
         message.warning('API 계정이 설정되지 않았습니다. 설정 페이지로 이동합니다.');
         setActiveTab('5');
@@ -157,8 +213,6 @@ function App() {
       console.error("Failed to check startup accounts", e);
     }
   };
-
-
 
   const fetchPartnerName = async (partnerId: number) => {
     try {
@@ -203,18 +257,20 @@ function App() {
       machineId: currentMachine?.machine_id || null,
       shipper_ids: currentMachine?.shipper_ids || null,
       accountType: currentAccountType,
+      isOnline: isOnline,
+      setIsOnline: setIsOnline,
     }}>
       <div className="container">
         {/* 메인 탭 네비게이션 */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 10px', backgroundColor: '#f0f2f5' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, backgroundColor: 'black', padding: '10px', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, backgroundColor: '#1E4496', padding: '10px', borderRadius: '8px' }}>
             <img src={logo} alt="logo" style={{ height: '40px', borderRadius: '4px' }} />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {partnerName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{partnerName}</Tag>}
               {accountName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{accountName}</Tag>}
               {machineName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{machineName}</Tag>}
-              <Button type="default" onClick={() => setIsAdminModalOpen(true)} style={{ display: currentMachine?.role === '*' ? 'block' : 'none', backgroundColor: '#F26D24', color: 'white', border: 'none' }}>어드민설정</Button>
+              <Button type="default" onClick={() => setIsAdminModalOpen(true)} style={{ display: currentMachine?.role === '*' ? 'block' : 'none', backgroundColor: '#F26D24', color: '#fff', border: 'none' }}>어드민설정</Button>
             </div>
           </div>
           <Tabs
@@ -236,7 +292,11 @@ function App() {
           <span>작업건수: {stats.count}</span>
           <span>미배송처리: {stats.unshipped}</span>
           <span>배송처리: {stats.shipped}</span>
-          {appVersion && <span style={{ marginLeft: 'auto' }}>v{appVersion}</span>}
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {appVersion && <span>v{appVersion}</span>}
+
+          </div>
         </div>
 
         <Modal

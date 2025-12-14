@@ -31,6 +31,7 @@ type App struct {
 	wsRequests  map[string]chan ScanResponseData
 	wsReqLock   sync.Mutex
 	isConnected bool
+	activeWSURL string
 }
 
 // WSMessage structure (same as backend)
@@ -49,6 +50,10 @@ type ScanResponseData struct {
 	WaybillNo   string `json:"waybill_no"`
 	InvoiceURL  string `json:"invoice_url"`
 	ZPLString   string `json:"zpl_string"`
+	WorkFlag    string `json:"work_flag"`
+	Status      string `json:"status"`
+	Hold        string `json:"hold"`
+	OrderCS     string `json:"order_cs"`
 }
 
 // NewApp creates a new App application struct
@@ -228,6 +233,11 @@ func (a *App) GetPrinters() []string {
 
 // WebSocket Implementation
 
+// Ping is a heartbeat check
+func (a *App) Ping() string {
+	return "Pong"
+}
+
 func (a *App) ConnectWebSocket(url string) string {
 	a.wsLock.Lock()
 	defer a.wsLock.Unlock()
@@ -236,42 +246,44 @@ func (a *App) ConnectWebSocket(url string) string {
 		a.wsConn.Close()
 	}
 
+	fmt.Println("BRIDGE: Attempting to connect to WS URL:", url)
 	c, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
+		fmt.Println("BRIDGE: Connection failed:", err)
 		a.isConnected = false
 		return fmt.Sprintf("Error connecting: %v", err)
 	}
 
 	a.wsConn = c
 	a.isConnected = true
+	a.activeWSURL = url
+	fmt.Println("BRIDGE: Connection successful!")
 
 	// Start reading loop
-	go a.readLoop()
+	go a.readLoop(c)
 
 	return "Connected"
 }
 
-func (a *App) readLoop() {
+func (a *App) readLoop(conn *websocket.Conn) {
 	defer func() {
 		a.wsLock.Lock()
-		if a.wsConn != nil {
+		// Only clear state if we are the current connection
+		if a.wsConn == conn {
+			fmt.Println("BRIDGE: Closing current connection and clearing state")
 			a.wsConn.Close()
 			a.wsConn = nil
+			a.isConnected = false
+		} else {
+			fmt.Println("BRIDGE: readLoop finished for OLD connection (ignored state reset)")
+			conn.Close() // Ensure old connection cleans up
 		}
-		a.isConnected = false
 		a.wsLock.Unlock()
 	}()
 
 	for {
 		var msg WSMessage
-		// Use a temporary variable to hold the connection to avoid holding the lock during ReadJSON
-		a.wsLock.Lock()
-		conn := a.wsConn
-		a.wsLock.Unlock()
-
-		if conn == nil {
-			break
-		}
+		// We use the 'conn' passed to us, which is immutable for this goroutine
 
 		err := conn.ReadJSON(&msg)
 		if err != nil {
@@ -283,15 +295,29 @@ func (a *App) readLoop() {
 		if msg.Type == "SCAN_RESULT" {
 			dataMap, ok := msg.Data.(map[string]interface{})
 			if ok {
+				// Helper to safely get string
+				getString := func(m map[string]interface{}, key string) string {
+					if val, ok := m[key]; ok {
+						if str, ok := val.(string); ok {
+							return str
+						}
+					}
+					return ""
+				}
+
 				// Convert map to ScanResponseData
 				resp := ScanResponseData{
 					Success:     dataMap["success"].(bool),
-					Message:     dataMap["message"].(string),
-					OrderNo:     dataMap["order_no"].(string),
-					ProductName: dataMap["product_name"].(string),
-					WaybillNo:   dataMap["waybill_no"].(string),
-					InvoiceURL:  dataMap["invoice_url"].(string),
-					ZPLString:   dataMap["zpl_string"].(string),
+					Message:     getString(dataMap, "message"),
+					OrderNo:     getString(dataMap, "order_no"),
+					ProductName: getString(dataMap, "product_name"),
+					WaybillNo:   getString(dataMap, "waybill_no"),
+					InvoiceURL:  getString(dataMap, "invoice_url"),
+					ZPLString:   getString(dataMap, "zpl_string"),
+					WorkFlag:    getString(dataMap, "work_flag"),
+					Status:      getString(dataMap, "status"),
+					Hold:        getString(dataMap, "hold"),
+					OrderCS:     getString(dataMap, "order_cs"),
 				}
 
 				a.wsReqLock.Lock()
@@ -305,10 +331,21 @@ func (a *App) readLoop() {
 	}
 }
 
-func (a *App) ScanBarcodeWS(waybillNo string, machineID int, packingType string) (*ScanResponseData, error) {
+func (a *App) ScanBarcodeWS(orderNo, startDate, endDate, shipperCode, waybillNo, productCode string, machineID int) (*ScanResponseData, error) {
 	if !a.isConnected {
-		return nil, fmt.Errorf("not connected to server")
+		fmt.Println("BRIDGE: ScanBarcodeWS called but NOT CONNECTED")
+		// Auto-reconnect attempt
+		if a.activeWSURL != "" {
+			fmt.Println("BRIDGE: Auto-reconnecting to", a.activeWSURL)
+			res := a.ConnectWebSocket(a.activeWSURL)
+			if res != "Connected" {
+				return nil, fmt.Errorf("not connected to server (reconnect failed: %s)", res)
+			}
+		} else {
+			return nil, fmt.Errorf("not connected to server (no active URL)")
+		}
 	}
+	fmt.Println("BRIDGE: ScanBarcodeWS sending request...")
 
 	reqID := uuid.New().String()
 	ch := make(chan ScanResponseData, 1)
@@ -318,9 +355,13 @@ func (a *App) ScanBarcodeWS(waybillNo string, machineID int, packingType string)
 	a.wsReqLock.Unlock()
 
 	reqData := map[string]interface{}{
-		"waybill_no":   waybillNo,
-		"machine_id":   machineID,
-		"packing_type": packingType,
+		"order_no":   orderNo,
+		"start_date": startDate,
+		"end_date":   endDate,
+		"shipper_cd": shipperCode,
+		"waybill_no": waybillNo,
+		"product_cd": productCode,
+		"machine_id": machineID,
 	}
 
 	msg := WSMessage{

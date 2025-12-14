@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Button, DatePicker, Table, Input, Row, Col, Typography, message, Select, Tag } from 'antd';
-import { CloudDownloadOutlined, CloudUploadOutlined, SearchOutlined, WifiOutlined, DisconnectOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, CloudUploadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from './config';
 import { AppContext } from './App';
@@ -13,35 +13,28 @@ const { Option } = Select;
 const SinglePack: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs(), dayjs()]);
-  const [isOnline, setIsOnline] = useState(false);
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('day'), dayjs().endOf('day')]);
 
   const [shippers, setShippers] = useState<any[]>([]);
   const [selectedShipper, setSelectedShipper] = useState<string>('');
 
-  const { partnerId, accountId, printerMain, printerAux, templateId, machineId, shipper_ids, accountType } = useContext(AppContext);
+  const { partnerId, accountId, printerMain, printerAux, templateId, machineId, shipper_ids, accountType, setIsOnline } = useContext(AppContext);
+
+  const getStatusText = (flag: string) => {
+    switch (flag) {
+      case '0': return '대기';
+      case '1': return '출력'; // Printed
+      case '2': return '보류'; // Hold
+      case '3': return '배송'; // Delivered
+      case '4': return '취소'; // Canceled
+      default: return '대기';
+    }
+  };
 
   // Debug log
   useEffect(() => {
     console.log('SinglePack Context:', { partnerId, accountId, printerMain, printerAux, templateId, shipper_ids });
   }, [partnerId, accountId, printerMain, printerAux, templateId, shipper_ids]);
-
-  // Connect WebSocket
-  useEffect(() => {
-    const wsUrl = API_BASE_URL.replace("http", "ws") + "/ws";
-    // @ts-ignore
-    window['go']['main']['App']['ConnectWebSocket'](wsUrl).then((res: string) => {
-      if (res === "Connected") {
-        setIsOnline(true);
-        message.success("서버에 연결되었습니다.");
-      } else {
-        setIsOnline(false);
-        message.error("서버 연결 실패: " + res);
-      }
-    });
-
-    // Optional: connection check loop, but Go handles keepalive
-  }, []);
 
   const fetchShippers = async () => {
     if (!accountId) return;
@@ -75,8 +68,8 @@ const SinglePack: React.FC = () => {
 
     setLoading(true);
     try {
-      const start = dateRange[0].format('YYYYMMDD');
-      const end = dateRange[1].format('YYYYMMDD');
+      const start = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
+      const end = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
 
       let url = `${API_BASE_URL}/orders/single?partner_id=${partnerId}&account_id=${accountId}&start_date=${start}&end_date=${end}&alloc_machine_id=${machineId || 0}`;
       if (selectedShipper) {
@@ -96,13 +89,15 @@ const SinglePack: React.FC = () => {
 
       const mappedData = data.map((item: any, index: number) => ({
         key: item.order_id || index,
-        status: item.result_status || '대기',
+        status: getStatusText(item.work_flag),
+        originalStatus: item.work_flag, // Keep for filtering logic
         csStatus: item.cancel_flag === 'Y' ? '취소' : '정상',
         scanTime: item.scan_date,
         packType: item.kind === '1' ? '단포' : '합포',
         waybillNo: item.waybill_no,
         productCode: item.product_cd,
         productName: item.product_name,
+        productOption: item.product_option || item.option1,
         optionName: item.option1,
         qty: item.order_qty,
         orderNo: item.order_no,
@@ -114,6 +109,7 @@ const SinglePack: React.FC = () => {
         shipperName: item.shipper_name,
         deviceName: item.device_name,
         printCount: item.print_count,
+        workFlag: item.work_flag, // Store raw flag
       }));
       setOrders(mappedData);
     } catch (err) {
@@ -136,10 +132,22 @@ const SinglePack: React.FC = () => {
     ...(accountType === 'MULTI' ? [{ title: '화주', dataIndex: 'shipperName', key: 'shipperName', width: 120 }] : []),
     { title: '발주일자', dataIndex: 'orderDate2', key: 'orderDate2', width: 100 },
     { title: '상품코드', dataIndex: 'productCode', key: 'productCode', width: 120 },
-    { title: '상품명', dataIndex: 'productName', key: 'productName', width: 200, ellipsis: true },
-    { title: '옵션명', dataIndex: 'optionName', key: 'optionName', width: 200, ellipsis: true },
-    { title: '수령인', dataIndex: 'receiver', key: 'receiver', width: 100 },
+    {
+      title: '상품명',
+      dataIndex: 'productName',
+      key: 'productName',
+      width: 250,
+      ellipsis: true,
+      render: (text: string, record: any) => (
+        <div style={{ whiteSpace: 'pre-wrap' }}>
+          {text} <br />
+          <span style={{ color: '#888', fontSize: '11px' }}>{record.productOption}</span>
+        </div>
+      )
+    },
+
     { title: '운송장번호', dataIndex: 'waybillNo', key: 'waybillNo', width: 150 },
+    { title: '수령인', dataIndex: 'receiver', key: 'receiver', width: 100 },
     { title: '주소', dataIndex: 'address', key: 'address', width: 150, ellipsis: true },
     { title: '수량', dataIndex: 'qty', key: 'qty', width: 60 },
     { title: '스캔일시', dataIndex: 'scanTime', key: 'scanTime', width: 160 },
@@ -160,8 +168,13 @@ const SinglePack: React.FC = () => {
 
   const handleScan = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      const productCode = e.currentTarget.value;
-      if (!productCode) return;
+      const productCodeInput = e.currentTarget && e.currentTarget.value;
+      if (!productCodeInput) return;
+
+      // Use local variable for clearing later, or ref
+      const setProductCodeInput = (val: string) => {
+        val && (e.currentTarget.value = val);
+      };
 
       if (!partnerId || !accountId) {
         message.warning('API 계정이 선택되지 않았습니다.');
@@ -172,12 +185,52 @@ const SinglePack: React.FC = () => {
       const inputElement = e.currentTarget;
 
       try {
-        // WebSocket Scan
+        // 1. Check if product exists in orders
+        const matchingOrders = orders.filter(o => o.productCode === productCodeInput);
+
+        if (matchingOrders.length === 0) {
+          message.warning('작업할 상품이 없습니다.');
+          playErrorSound();
+          return;
+        }
+
+        // 2. Check for '대기' status
+        const pendingOrder = matchingOrders.find(o => o.status === '대기');
+
+        let targetWaybillNo = '';
+
+        if (pendingOrder) {
+          targetWaybillNo = pendingOrder.waybillNo;
+        } else {
+          // No pending order found, show status of the first match (or generic message)
+          const firstMatch = matchingOrders[0];
+          message.warning(`이미 ${firstMatch.status} 되었습니다.`);
+          playErrorSound();
+          return;
+        }
+
+        // WebSocket Scan with resolved WaybillNo
         // @ts-ignore
-        const result = await window['go']['main']['App']['ScanBarcodeWS'](
-          productCode,
-          machineId || 0,
-          "ONE"
+        const orderNo = pendingOrder.orderNo;
+        const startDate = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
+        const endDate = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
+        const shipperCode = selectedShipper || '';
+
+        console.log("Scan Start:", startDate);
+        console.log("Scan End:", endDate);
+        console.log("Shipper Code:", shipperCode);
+        console.log("Waybill No:", targetWaybillNo);
+        console.log("Product Code:", productCodeInput);
+        console.log("Machine ID:", machineId || 0);
+
+        const result = await (window as any)['go']['main']['App']['ScanBarcodeWS'](
+          orderNo,
+          startDate,
+          endDate,
+          shipperCode,
+          targetWaybillNo,
+          productCodeInput,
+          machineId || 0
         );
 
         console.log("Scan Result:", result);
@@ -190,45 +243,91 @@ const SinglePack: React.FC = () => {
           });
 
           // Print ZPL if exists
-          if (result.zpl_string && printerMain) {
-            try {
-              // @ts-ignore
-              const printRes = await window['go']['main']['App']['PrintZPL'](printerMain, result.zpl_string);
-              if (printRes !== "Success") {
-                message.error(`프린터 출력 실패: ${printRes}`);
-                playErrorSound();
-              } else {
-                message.success("운송장 출력 완료");
-                playSuccessSound();
-              }
-            } catch (pe) {
-              console.error("Print Error:", pe);
-              message.error("프린터 통신 오류");
-              playErrorSound();
-            }
-          } else {
-            playSuccessSound();
-          }
+          // if (result.zpl_string && printerMain) {
+          //   try {
+          //     // @ts-ignore
+          //     const printRes = await window['go']['main']['App']['PrintZPL'](printerMain, result.zpl_string);
+          //     if (printRes !== "Success") {
+          //       message.error(`프린터 출력 실패: ${printRes}`);
+          //       playErrorSound();
+          //     } else {
+          //       message.success("운송장 출력 완료");
+          //       playSuccessSound();
+          //     }
+          //   } catch (pe) {
+          //     console.error("Print Error:", pe);
+          //     message.error("프린터 통신 오류");
+          //     playErrorSound();
+          //   }
+          // } else {
+          playSuccessSound();
+          // }
+          setProductCodeInput(""); // Clear input
+          fetchOrders(); // Refresh list
+
         } else {
           throw new Error(result.message);
         }
-
       } catch (err: any) {
         console.error("Scan Failed:", err);
+        const errMsg = err.message || 'Scan Failed';
+
+        if (errMsg.includes("not connected")) {
+          setIsOnline(false);
+        }
+
         setScanResult({
           status: 'error',
-          message: err.message || 'Scan Failed'
+          message: errMsg
         });
-        message.error(err.message || "스캔 실패");
+        message.error(errMsg);
         playErrorSound();
       } finally {
         if (inputElement) {
-          inputElement.value = '';
+          inputElement.select();
         }
       }
     }
   };
 
+  const handleSync = async () => {
+    if (!accountId) {
+      message.warning('API 계정을 선택해주세요.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const start = dateRange[0].format('YYYY-MM-DD');
+      const end = dateRange[1].format('YYYY-MM-DD');
+
+      const res = await fetch(`${API_BASE_URL}/orders/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: accountId,
+          start_date: start,
+          end_date: end,
+        }),
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        message.success(`주문 수집 완료 (건수: ${result.count})`);
+        fetchOrders(); // Refresh list
+      } else {
+        const err = await res.json();
+        message.error(`주문 수집 실패: ${err.error}`);
+      }
+    } catch (e) {
+      console.error(e);
+      message.error('주문 수집 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="content-area">
@@ -237,6 +336,8 @@ const SinglePack: React.FC = () => {
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Text strong>발주일자</Text>
           <RangePicker
+            showTime={{ format: 'HH:mm' }}
+            format="YYYY-MM-DD HH:mm"
             value={dateRange}
             onChange={(dates) => {
               if (dates && dates[0] && dates[1]) {
@@ -267,18 +368,21 @@ const SinglePack: React.FC = () => {
           >
             조회
           </Button>
-          {isOnline ? (
-            <Tag icon={<WifiOutlined />} color="success">Online</Tag>
-          ) : (
-            <Tag icon={<DisconnectOutlined />} color="error">Offline</Tag>
-          )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          {/* Removed Sync Button as it is real-time now */}
+          <Button
+            type="primary"
+            icon={<CloudDownloadOutlined />}
+            style={{ backgroundColor: '#1E4496', color: '#fff' }}
+            onClick={handleSync}
+            loading={loading}
+          >
+            주문수집
+          </Button>
           <Button
             type="primary"
             icon={<CloudUploadOutlined />}
-            style={{ backgroundColor: '#1E4496' }}
+            style={{ backgroundColor: '#1E4496', color: '#fff' }}
             disabled
           >
             배송처리
@@ -290,10 +394,10 @@ const SinglePack: React.FC = () => {
         {/* 좌측 그리드 */}
         <Col span={16} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <div style={{ marginBottom: 5, display: 'flex', justifyContent: 'space-between' }}>
-            <Text strong>작업할 내역입니다. (건수: {orders.length})</Text>
+            <Text strong>작업할 내역입니다. (건수: {orders.filter(o => o.workFlag === '0').length})</Text>
           </div>
           <Table
-            dataSource={orders}
+            dataSource={orders.filter(o => o.workFlag === '0')} // Only Pending
             columns={columns}
             pagination={false}
             scroll={{ y: 'calc(100vh - 250px)' }}
@@ -347,9 +451,28 @@ const SinglePack: React.FC = () => {
               </Title>
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginTop: 'auto' }}>
+            <div style={{ display: 'flex', gap: 10, marginTop: '10px', marginBottom: '10px' }}>
               <Button size="large" block style={{ backgroundColor: '#004d40', color: 'white' }}>보조프린트</Button>
               <Button size="large" block type="primary" danger>재발행</Button>
+            </div>
+
+            {/* Add Scanned List Table Here */}
+            <div style={{ flex: 1, marginTop: '20px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <Text strong>작업 완료 내역 (금일)</Text>
+              <Table
+                dataSource={orders.filter(o => (o.workFlag === '1' || o.workFlag === '2') && machineId === o.allocMachineId).sort((a, b) => (b.scanTime || '').localeCompare(a.scanTime || ''))} // Completed & Sorted
+                columns={[
+                  { title: '상태', dataIndex: 'status', width: 60 },
+                  { title: '운송장번호', dataIndex: 'waybillNo', width: 120 },
+                  { title: '상품명', dataIndex: 'productName', width: 150, ellipsis: true },
+                  { title: '스캔시간', dataIndex: 'scanTime', width: 100 },
+                ]}
+                pagination={false}
+                scroll={{ y: 200 }} // Fixed height for small table
+                size="small"
+                bordered
+                rowKey="key"
+              />
             </div>
           </div>
         </Col>
