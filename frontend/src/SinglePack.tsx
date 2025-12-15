@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Button, DatePicker, Table, Input, Row, Col, Typography, message, Select, Tag } from 'antd';
+import { Button, DatePicker, Table, Input, Row, Col, Typography, message, Select, Tag, Modal, InputRef, Switch, Radio } from 'antd';
 import { CloudDownloadOutlined, CloudUploadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from './config';
@@ -12,8 +12,45 @@ const { Option } = Select;
 
 const SinglePack: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
+  const [completedOrders, setCompletedOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('day'), dayjs().endOf('day')]);
+  const inputRef = React.useRef<InputRef>(null);
+  const [useAuxPrinter, setUseAuxPrinter] = useState(false);
+
+  const [errorModal, setErrorModal] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (errorModal.visible) {
+        setErrorModal({ ...errorModal, visible: false });
+        // Try to focus back to input
+        setTimeout(() => {
+          if (inputRef.current) {
+            inputRef.current.focus();
+          }
+        }, 50);
+      }
+    };
+
+    if (errorModal.visible) {
+      // Delay adding the listener to avoid immediate closing by scanner "Enter" or "LF"
+      timeoutId = setTimeout(() => {
+        window.addEventListener('keydown', handleKeyDown);
+      }, 300);
+    }
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [errorModal.visible]);
+
+  const showError = (msg: string) => {
+    console.log("Showing Error Modal:", msg);
+    setErrorModal({ visible: true, message: msg });
+    playErrorSound();
+  };
 
   const [shippers, setShippers] = useState<any[]>([]);
   const [selectedShipper, setSelectedShipper] = useState<string>('');
@@ -71,7 +108,7 @@ const SinglePack: React.FC = () => {
       const start = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
       const end = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
 
-      let url = `${API_BASE_URL}/orders/single?partner_id=${partnerId}&account_id=${accountId}&start_date=${start}&end_date=${end}&alloc_machine_id=${machineId || 0}`;
+      let url = `${API_BASE_URL}/orders/single?partner_id=${partnerId}&account_id=${accountId}&start_date=${start}&end_date=${end}`;
       if (selectedShipper) {
         url += `&shipper_code=${selectedShipper}`;
       }
@@ -88,7 +125,7 @@ const SinglePack: React.FC = () => {
       }
 
       const mappedData = data.map((item: any, index: number) => ({
-        key: item.order_id || index,
+        key: index,
         status: getStatusText(item.work_flag),
         originalStatus: item.work_flag, // Keep for filtering logic
         csStatus: item.cancel_flag === 'Y' ? '취소' : '정상',
@@ -120,11 +157,48 @@ const SinglePack: React.FC = () => {
     }
   };
 
+  const fetchCompletedOrders = async () => {
+    if (!partnerId || !accountId) return;
+
+    try {
+      // Default to today
+      const today = dayjs().format('YYYYMMDD');
+      let url = `${API_BASE_URL}/orders/completed?partner_id=${partnerId}&account_id=${accountId}&date=${today}`;
+      if (machineId) {
+        url += `&machine_id=${machineId}`;
+      }
+
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const mappedData = data.map((item: any, index: number) => ({
+          key: `comp_${index}`,
+          status: getStatusText(item.work_flag),
+          waybillNo: item.waybill_no,
+          productName: item.product_name,
+          scanTime: item.scan_date,
+        }));
+        setCompletedOrders(mappedData);
+      }
+    } catch (e) {
+      console.error("Failed to fetch completed orders", e);
+    }
+  };
+
   useEffect(() => {
     if (partnerId && accountId) {
       fetchOrders();
+      fetchCompletedOrders();
     }
   }, [dateRange, partnerId, accountId, selectedShipper]);
+
+  // Fetch completed orders when machineId changes or regularly if needed? 
+  // For now stick to the main dependency array or add machineId
+  useEffect(() => {
+    if (partnerId && accountId) {
+      fetchCompletedOrders();
+    }
+  }, [machineId]);
 
   const columns = [
     { title: '상태', dataIndex: 'status', key: 'status', width: 60 },
@@ -177,8 +251,7 @@ const SinglePack: React.FC = () => {
       };
 
       if (!partnerId || !accountId) {
-        message.warning('API 계정이 선택되지 않았습니다.');
-        playErrorSound();
+        showError('API 계정이 선택되지 않았습니다.');
         return;
       }
 
@@ -189,8 +262,7 @@ const SinglePack: React.FC = () => {
         const matchingOrders = orders.filter(o => o.productCode === productCodeInput);
 
         if (matchingOrders.length === 0) {
-          message.warning('작업할 상품이 없습니다.');
-          playErrorSound();
+          showError('작업할 상품이 없습니다.');
           return;
         }
 
@@ -204,10 +276,12 @@ const SinglePack: React.FC = () => {
         } else {
           // No pending order found, show status of the first match (or generic message)
           const firstMatch = matchingOrders[0];
-          message.warning(`이미 ${firstMatch.status} 되었습니다.`);
-          playErrorSound();
+          showError(`이미 ${firstMatch.status} 되었습니다.`);
           return;
         }
+
+        // Determine target printer
+        const targetPrinter = useAuxPrinter ? printerAux : printerMain;
 
         // WebSocket Scan with resolved WaybillNo
         // @ts-ignore
@@ -222,6 +296,7 @@ const SinglePack: React.FC = () => {
         console.log("Waybill No:", targetWaybillNo);
         console.log("Product Code:", productCodeInput);
         console.log("Machine ID:", machineId || 0);
+        console.log("Target Printer:", targetPrinter, "(Use Aux:", useAuxPrinter, ")");
 
         const result = await (window as any)['go']['main']['App']['ScanBarcodeWS'](
           orderNo,
@@ -243,27 +318,30 @@ const SinglePack: React.FC = () => {
           });
 
           // Print ZPL if exists
-          // if (result.zpl_string && printerMain) {
-          //   try {
-          //     // @ts-ignore
-          //     const printRes = await window['go']['main']['App']['PrintZPL'](printerMain, result.zpl_string);
-          //     if (printRes !== "Success") {
-          //       message.error(`프린터 출력 실패: ${printRes}`);
-          //       playErrorSound();
-          //     } else {
-          //       message.success("운송장 출력 완료");
-          //       playSuccessSound();
-          //     }
-          //   } catch (pe) {
-          //     console.error("Print Error:", pe);
-          //     message.error("프린터 통신 오류");
-          //     playErrorSound();
-          //   }
-          // } else {
-          playSuccessSound();
-          // }
+          if (result.zpl_string && printerMain) {
+            try {
+              // @ts-ignore
+              const printRes = await window['go']['main']['App']['PrintZPL'](printerMain, result.zpl_string);
+              if (printRes !== "Success") {
+                message.error(`프린터 출력 실패: ${printRes}`);
+                playErrorSound();
+              } else {
+                message.success("운송장 출력 완료");
+                playSuccessSound();
+              }
+            } catch (pe) {
+              console.error("Print Error:", pe);
+              // message.error("프린터 통신 오류");
+              showError("프린터 통신 오류");
+              playErrorSound();
+            }
+          } else {
+            playSuccessSound();
+          }
+          setProductCodeInput(""); // Clear input
           setProductCodeInput(""); // Clear input
           fetchOrders(); // Refresh list
+          fetchCompletedOrders(); // Refresh completed list
 
         } else {
           throw new Error(result.message);
@@ -280,8 +358,7 @@ const SinglePack: React.FC = () => {
           status: 'error',
           message: errMsg
         });
-        message.error(errMsg);
-        playErrorSound();
+        showError(errMsg);
       } finally {
         if (inputElement) {
           inputElement.select();
@@ -298,8 +375,8 @@ const SinglePack: React.FC = () => {
 
     try {
       setLoading(true);
-      const start = dateRange[0].format('YYYY-MM-DD');
-      const end = dateRange[1].format('YYYY-MM-DD');
+      const startDate = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
+      const endDate = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
 
       const res = await fetch(`${API_BASE_URL}/orders/sync`, {
         method: 'POST',
@@ -308,8 +385,8 @@ const SinglePack: React.FC = () => {
         },
         body: JSON.stringify({
           account_id: accountId,
-          start_date: start,
-          end_date: end,
+          start_date: startDate,
+          end_date: endDate,
         }),
       });
 
@@ -369,7 +446,7 @@ const SinglePack: React.FC = () => {
             조회
           </Button>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Button
             type="primary"
             icon={<CloudDownloadOutlined />}
@@ -409,17 +486,28 @@ const SinglePack: React.FC = () => {
 
         {/* 우측 스캔 패널 */}
         <Col span={8} style={{ height: '100%' }}>
+          {/* <Text type="secondary" style={{ fontSize: '16px' }}>바코드 스캔</Text> */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'right' }}>
+            <Radio.Group
+              value={useAuxPrinter ? 'AUX' : 'MAIN'}
+              onChange={(e) => setUseAuxPrinter(e.target.value === 'AUX')}
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Radio.Button value="MAIN">메인프린터</Radio.Button>
+              <Radio.Button value="AUX">보조프린터</Radio.Button>
+            </Radio.Group>
+          </div>
+          <Input
+            ref={inputRef}
+            size="large"
+            placeholder="바코드 스캔"
+            autoFocus
+            style={{ marginBottom: 20, marginTop: 10 }}
+            onKeyDown={handleScan}
+          />
           <div className="scan-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{ flex: 1 }}>
-              <Text type="secondary" style={{ fontSize: '16px' }}>Scan Product</Text>
-              <Input
-                size="large"
-                placeholder="바코드 스캔"
-                autoFocus
-                style={{ marginBottom: 20, marginTop: 10 }}
-                onKeyDown={handleScan}
-              />
-
               {/* Status Box */}
               <div style={{
                 border: scanResult.status === 'success' ? '2px solid #00ff00' : (scanResult.status === 'error' ? '2px solid #ff0000' : '1px solid #d9d9d9'),
@@ -440,19 +528,22 @@ const SinglePack: React.FC = () => {
                 )}
               </div>
 
-              <div className="big-text">Waybill No:</div>
-              <div className="big-text" style={{ color: '#333', fontSize: '24px', fontWeight: 'bold' }}>
-                {scanResult.waybillNo || '-'}
+              <div style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>
+                <div className="big-text" style={{ marginRight: '10px' }}>운송장:</div>
+                <div className="big-text" style={{ color: '#333', fontSize: '24px', fontWeight: 'bold' }}>
+                  {scanResult.waybillNo || ''}
+                </div>
               </div>
-
-              <div className="big-text" style={{ marginTop: '20px' }}>Product Name:</div>
-              <Title level={3} style={{ marginTop: 5 }}>
-                {scanResult.productName || '-'}
-              </Title>
+              <div style={{ display: 'flex', alignItems: 'center', marginTop: '10px' }}>
+                <div className="big-text" style={{ marginRight: '10px' }}>상품명:</div>
+                <div className="big-text" style={{ color: '#333', fontSize: '24px', fontWeight: 'bold' }}>
+                  {scanResult.productName || ''}
+                </div>
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginTop: '10px', marginBottom: '10px' }}>
-              <Button size="large" block style={{ backgroundColor: '#004d40', color: 'white' }}>보조프린트</Button>
+              {/* <Button size="large" block style={{ backgroundColor: '#004d40', color: 'white' }}>보조프린트</Button> */}
               <Button size="large" block type="primary" danger>재발행</Button>
             </div>
 
@@ -460,7 +551,7 @@ const SinglePack: React.FC = () => {
             <div style={{ flex: 1, marginTop: '20px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <Text strong>작업 완료 내역 (금일)</Text>
               <Table
-                dataSource={orders.filter(o => (o.workFlag === '1' || o.workFlag === '2') && machineId === o.allocMachineId).sort((a, b) => (b.scanTime || '').localeCompare(a.scanTime || ''))} // Completed & Sorted
+                dataSource={completedOrders} // Fetched from API
                 columns={[
                   { title: '상태', dataIndex: 'status', width: 60 },
                   { title: '운송장번호', dataIndex: 'waybillNo', width: 120 },
@@ -477,6 +568,19 @@ const SinglePack: React.FC = () => {
           </div>
         </Col>
       </Row>
+      <Modal
+        open={errorModal.visible}
+        visible={errorModal.visible} // For Antd v4 compatibility
+        footer={null}
+        closable={false}
+        centered
+        width={500}
+        styles={{ body: { textAlign: 'center', paddingLeft: '30px', paddingRight: '30px', paddingTop: '15px', paddingBottom: '20px' } }}
+      >
+        <Title level={2} style={{ color: '#ff4d4f', marginBottom: 0 }}>
+          {errorModal.message}
+        </Title>
+      </Modal>
     </div>
   );
 };
