@@ -13,7 +13,9 @@ const { Option } = Select;
 const SinglePack: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [completedOrders, setCompletedOrders] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [shippingLoading, setShippingLoading] = useState(false);
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('day'), dayjs().endOf('day')]);
   const inputRef = React.useRef<InputRef>(null);
   const [useAuxPrinter, setUseAuxPrinter] = useState(false);
@@ -103,7 +105,7 @@ const SinglePack: React.FC = () => {
   const fetchOrders = async () => {
     if (!partnerId || !accountId) return;
 
-    setLoading(true);
+    setSearchLoading(true);
     try {
       const start = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
       const end = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
@@ -153,7 +155,7 @@ const SinglePack: React.FC = () => {
       console.error(err);
       message.error('주문 목록을 불러오는데 실패했습니다.');
     } finally {
-      setLoading(false);
+      setSearchLoading(false);
     }
   };
 
@@ -305,7 +307,8 @@ const SinglePack: React.FC = () => {
           shipperCode,
           targetWaybillNo,
           productCodeInput,
-          machineId || 0
+          machineId || 0,
+          accountId || 0,
         );
 
         console.log("Scan Result:", result);
@@ -374,7 +377,7 @@ const SinglePack: React.FC = () => {
     }
 
     try {
-      setLoading(true);
+      setSyncLoading(true);
       const startDate = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
       const endDate = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
 
@@ -402,8 +405,71 @@ const SinglePack: React.FC = () => {
       console.error(e);
       message.error('주문 수집 중 오류가 발생했습니다.');
     } finally {
-      setLoading(false);
+      setSyncLoading(false);
     }
+  };
+
+  const handleShippingProcess = async () => {
+    if (!accountId || !machineId) {
+      // machineId might be 0, wait, user said machine_id parameter.
+      // If machineId is not set in context, we probably can't proceed or should warn?
+      // Assuming machineId is available from context.
+      if (!machineId) {
+        message.warning('장비 설정이 필요합니다.');
+        return;
+      }
+      if (!accountId) {
+        message.warning('API 계정을 선택해주세요.');
+        return;
+      }
+    }
+
+    try {
+      setShippingLoading(true);
+      const res = await fetch(`${API_BASE_URL}/orders/shipping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: accountId,
+          machine_id: machineId,
+        }),
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success) {
+          message.success(`배송처리 완료 (건수: ${result.count})`);
+          fetchOrders();
+          fetchCompletedOrders();
+        } else {
+          message.error(`배송처리 실패: ${result.error || 'Unknown error'}`);
+        }
+      } else {
+        const err = await res.json();
+        message.error(`배송처리 실패: ${err.error}`);
+      }
+    } catch (e) {
+      console.error(e);
+      message.error('배송처리 중 오류가 발생했습니다.');
+    } finally {
+      setShippingLoading(false);
+    }
+  };
+
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+
+  const handleRowClick = (record: any) => {
+    setSelectedRowKey(record.key);
+    setScanResult({
+      status: 'success', // Or 'idle' to keep it neutral, but user asked to show it in the top box which usually implies 'success' look or just data display.
+      // Keeping 'success' to make it green OK or just reusing the display logic.
+      // Actually, if we just want to show info, maybe 'idle' is better but the user might want to see it prominent.
+      // scanResult controls the big box.
+      waybillNo: record.waybillNo,
+      productName: record.productName,
+    });
   };
 
   return (
@@ -442,6 +508,7 @@ const SinglePack: React.FC = () => {
             icon={<SearchOutlined />}
             style={{ color: '#1E4496', borderColor: '#1E4496' }}
             onClick={fetchOrders}
+            loading={searchLoading}
           >
             조회
           </Button>
@@ -452,7 +519,7 @@ const SinglePack: React.FC = () => {
             icon={<CloudDownloadOutlined />}
             style={{ backgroundColor: '#1E4496', color: '#fff' }}
             onClick={handleSync}
-            loading={loading}
+            loading={syncLoading}
           >
             주문수집
           </Button>
@@ -460,7 +527,8 @@ const SinglePack: React.FC = () => {
             type="primary"
             icon={<CloudUploadOutlined />}
             style={{ backgroundColor: '#1E4496', color: '#fff' }}
-            disabled
+            onClick={handleShippingProcess}
+            loading={shippingLoading}
           >
             배송처리
           </Button>
@@ -480,7 +548,7 @@ const SinglePack: React.FC = () => {
             scroll={{ y: 'calc(100vh - 250px)' }}
             size="small"
             bordered
-            loading={loading}
+            loading={searchLoading}
           />
         </Col>
 
@@ -542,14 +610,14 @@ const SinglePack: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginTop: '10px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '20px', marginBottom: '5px' }}>
               {/* <Button size="large" block style={{ backgroundColor: '#004d40', color: 'white' }}>보조프린트</Button> */}
-              <Button size="large" block type="primary" danger>재발행</Button>
+              <Button size="large" block type="primary" style={{ width: 300 }} danger>재발행</Button>
             </div>
 
             {/* Add Scanned List Table Here */}
             <div style={{ flex: 1, marginTop: '20px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <Text strong>작업 완료 내역 (금일)</Text>
+              {/* <Text strong>작업 완료 내역 (금일)</Text> */}
               <Table
                 dataSource={completedOrders} // Fetched from API
                 columns={[
@@ -563,6 +631,16 @@ const SinglePack: React.FC = () => {
                 size="small"
                 bordered
                 rowKey="key"
+                onRow={(record) => {
+                  return {
+                    onClick: () => handleRowClick(record),
+                    style: {
+                      // Removed inline background/color to use CSS classes
+                      cursor: 'pointer'
+                    }
+                  };
+                }}
+                rowClassName={(record) => record.key === selectedRowKey ? 'selected-row' : ''}
               />
             </div>
           </div>

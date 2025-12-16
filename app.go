@@ -331,7 +331,7 @@ func (a *App) readLoop(conn *websocket.Conn) {
 	}
 }
 
-func (a *App) ScanBarcodeWS(orderNo, startDate, endDate, shipperCode, waybillNo, productCode string, machineID int) (*ScanResponseData, error) {
+func (a *App) ScanBarcodeWS(orderNo, startDate, endDate, shipperCode, waybillNo, productCode string, machineID int, accountID int) (*ScanResponseData, error) {
 	if !a.isConnected {
 		fmt.Println("BRIDGE: ScanBarcodeWS called but NOT CONNECTED")
 		// Auto-reconnect attempt
