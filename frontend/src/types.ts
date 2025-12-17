@@ -43,7 +43,9 @@ export interface Machine {
   machine_uuid: string;
   machine_name: string;
   printer_main: string;
+  printer_main_ip?: string;
   printer_aux: string;
+  printer_aux_ip?: string;
   is_approved: boolean;
   api_url?: string;
   machine_desc?: string;

@@ -2,13 +2,12 @@ module wails-app
 
 go 1.23
 
-require github.com/wailsapp/wails/v2 v2.11.0
-
 require (
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/rhysd/go-github-selfupdate v1.2.3
+	github.com/wailsapp/wails/v2 v2.11.0
 )
 
 require (

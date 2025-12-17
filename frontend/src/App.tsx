@@ -17,7 +17,9 @@ export const AppContext = createContext<{
   partnerId: number | null;
   accountId: number | null;
   printerMain: string;
+  printerMainIP: string;
   printerAux: string;
+  printerAuxIP: string;
   templateId: string;
   machineId: number | null;
   shipper_ids: number[] | null;
@@ -28,7 +30,9 @@ export const AppContext = createContext<{
   partnerId: null,
   accountId: null,
   printerMain: '',
+  printerMainIP: '',
   printerAux: '',
+  printerAuxIP: '',
   templateId: '',
   machineId: null,
   shipper_ids: null,
@@ -252,7 +256,9 @@ function App() {
       partnerId: defaultPartnerId,
       accountId: defaultAccountId,
       printerMain: currentMachine?.printer_main || '',
+      printerMainIP: currentMachine?.printer_main_ip || '',
       printerAux: currentMachine?.printer_aux || '',
+      printerAuxIP: currentMachine?.printer_aux_ip || '',
       templateId: currentMachine?.waybill_template || '',
       machineId: currentMachine?.machine_id || null,
       shipper_ids: currentMachine?.shipper_ids || null,
@@ -288,14 +294,8 @@ function App() {
 
         {/* 하단 상태바 */}
         <div className="footer-bar">
-          <span>오늘 작업량: {stats.todayWork}</span>
-          <span>작업건수: {stats.count}</span>
-          <span>미배송처리: {stats.unshipped}</span>
-          <span>배송처리: {stats.shipped}</span>
-
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
             {appVersion && <span>v{appVersion}</span>}
-
           </div>
         </div>
 

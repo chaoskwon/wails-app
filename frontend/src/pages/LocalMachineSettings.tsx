@@ -17,9 +17,9 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
   const [machine, setMachine] = useState<Machine | null>(null);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
-  const [printers, setPrinters] = useState<string[]>([]); // Keep as string[] based on usage in fetchPrinters
-  const [mainPrinterOptions, setMainPrinterOptions] = useState<{ value: string }[]>([]);
-  const [auxPrinterOptions, setAuxPrinterOptions] = useState<{ value: string }[]>([]);
+  const [printers, setPrinters] = useState<{ name: string, ip: string }[]>([]);
+  const [mainPrinterOptions, setMainPrinterOptions] = useState<{ value: string, ip: string }[]>([]);
+  const [auxPrinterOptions, setAuxPrinterOptions] = useState<{ value: string, ip: string }[]>([]);
   const [systemUUID, setSystemUUID] = useState<string>('');
   const [shippers, setShippers] = useState<Shipper[]>([]);
 
@@ -61,7 +61,7 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
         // @ts-ignore
         const printerList = await window['go']['main']['App']['GetPrinters']();
         setPrinters(printerList);
-        const options = printerList.map((p: string) => ({ value: p }));
+        const options = printerList.map((p: { name: string, ip: string }) => ({ value: p.name, ip: p.ip }));
         setMainPrinterOptions(options);
         setAuxPrinterOptions(options);
       }
@@ -123,7 +123,7 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
 
   const fetchShippers = async (accId: number) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/shippers?account_id=${accId}`);
+      const response = await fetch(`${API_BASE_URL}/shippers?account_id=${accId}`);
       if (response.ok) {
         const data = await response.json();
         const sortedData = data.sort((a: Shipper, b: Shipper) => {
@@ -175,6 +175,17 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
+
+      // Validate Printer IPs
+      if (values.printer_main && !values.printer_main_ip) {
+        message.error("메인 프린터의 IP 주소가 확인되지 않습니다. TCP/IP 연결 상태를 확인해주세요.");
+        return;
+      }
+      if (values.printer_aux && !values.printer_aux_ip) {
+        message.error("보조 프린터의 IP 주소가 확인되지 않습니다. TCP/IP 연결 상태를 확인해주세요.");
+        return;
+      }
+
       const payload = {
         machine_uuid: values.machine_uuid,
         machine_name: values.machine_name,
@@ -182,7 +193,9 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
         account_id: values.account_id ? Number(values.account_id) : 0,
         waybill_template: values.waybill_template,
         printer_main: values.printer_main,
+        printer_main_ip: values.printer_main_ip,
         printer_aux: values.printer_aux,
+        printer_aux_ip: values.printer_aux_ip,
         is_active: 'Y',
         use_inspection: values.use_inspection_bool ? 'Y' : 'N',
         shipper_ids: shipperMode === 'all' ? null : selectedShipperKeys,
@@ -228,13 +241,13 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
   const partnerIdInForm = Form.useWatch('partner_id', form);
   const filteredAccounts = accounts.filter(a => a.partner_id === partnerIdInForm);
 
-  const handlePrinterSearch = (value: string, setOptions: React.Dispatch<React.SetStateAction<{ value: string }[]>>) => {
-    const filtered = printers.filter(p => p.toUpperCase().includes(value.toUpperCase())).map(p => ({ value: p }));
+  const handlePrinterSearch = (value: string, setOptions: React.Dispatch<React.SetStateAction<{ value: string, ip: string }[]>>) => {
+    const filtered = printers.filter(p => p.name.toUpperCase().includes(value.toUpperCase())).map(p => ({ value: p.name, ip: p.ip }));
     setOptions(filtered);
   };
 
-  const handlePrinterFocus = (setOptions: React.Dispatch<React.SetStateAction<{ value: string }[]>>) => {
-    setOptions(printers.map(p => ({ value: p })));
+  const handlePrinterFocus = (setOptions: React.Dispatch<React.SetStateAction<{ value: string, ip: string }[]>>) => {
+    setOptions(printers.map(p => ({ value: p.name, ip: p.ip })));
   };
 
   if (loading) {
@@ -275,23 +288,49 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
                 <Input />
               </Form.Item>
               <Form.Item name="waybill_template" label="운송장 템플릿">
-                <Input placeholder="예: CJ_Normal.zpl" />
+                <Input placeholder="예: 12" />
               </Form.Item>
+
+              {/* Show template from selected account hint
+              {(() => {
+                const selectedAccount = accounts.find(a => a.account_id === form.getFieldValue('account_id'));
+                if (selectedAccount && selectedAccount.waybill_template) {
+                  return (
+                    <div style={{ marginTop: -20, marginBottom: 20, color: '#888', fontSize: 12, paddingLeft: 4 }}>
+                      * 선택된 계정의 기본 템플릿: {selectedAccount.waybill_template}
+                    </div>
+                  )
+                }
+              })()} */}
+
               <Form.Item name="printer_main" label="메인 프린터">
                 <AutoComplete
                   options={mainPrinterOptions}
                   onSearch={(val) => handlePrinterSearch(val, setMainPrinterOptions)}
                   onFocus={() => handlePrinterFocus(setMainPrinterOptions)}
+                  onSelect={(val, option) => {
+                    form.setFieldsValue({ printer_main_ip: option.ip });
+                  }}
                   placeholder="IP 또는 드라이버명"
                 />
               </Form.Item>
+              <Form.Item name="printer_main_ip" label="메인 프린터 IP">
+                <Input readOnly placeholder="자동 입력됨" style={{ backgroundColor: '#f5f5f5', color: '#666' }} />
+              </Form.Item>
+
               <Form.Item name="printer_aux" label="보조 프린터">
                 <AutoComplete
                   options={auxPrinterOptions}
                   onSearch={(val) => handlePrinterSearch(val, setAuxPrinterOptions)}
                   onFocus={() => handlePrinterFocus(setAuxPrinterOptions)}
+                  onSelect={(val, option) => {
+                    form.setFieldsValue({ printer_aux_ip: option.ip });
+                  }}
                   placeholder="보조 프린터 선택"
                 />
+              </Form.Item>
+              <Form.Item name="printer_aux_ip" label="보조 프린터 IP">
+                <Input readOnly placeholder="자동 입력됨" style={{ backgroundColor: '#f5f5f5', color: '#666' }} />
               </Form.Item>
             </Card>
           </Col>
