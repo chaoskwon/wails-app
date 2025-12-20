@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Switch, Space, Tag, Row, Col
 import { PlusOutlined, SettingOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { Partner, Machine, ApiAccount, Shipper } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -32,7 +33,7 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess, de
 
   const fetchShippers = async (accId: number) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/shippers?account_id=${accId}`);
+      const response = await fetchWithAuth(`${API_BASE_URL}/shippers?account_id=${accId}`);
       if (response.ok) {
         const data = await response.json();
         setShippers(data);
@@ -54,7 +55,7 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess, de
     if (!accountId) return;
     try {
       message.loading({ content: '화주 정보를 수집 중입니다...', key: 'syncShippers' });
-      const response = await fetch(`${API_BASE_URL}/shippers/sync`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/shippers/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: accountId }),
@@ -76,10 +77,10 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess, de
 
   const fetchBasicData = async () => {
     try {
-      const resPartners = await fetch(`${API_BASE_URL}/partners`);
+      const resPartners = await fetchWithAuth(`${API_BASE_URL}/partners`);
       if (resPartners.ok) setPartners(await resPartners.json());
 
-      const resAccounts = await fetch(`${API_BASE_URL}/accounts`);
+      const resAccounts = await fetchWithAuth(`${API_BASE_URL}/accounts`);
       if (resAccounts.ok) setAccounts(await resAccounts.json());
     } catch (e) { console.error(e); }
   };
@@ -117,7 +118,7 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess, de
 
   const fetchMachines = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/machines`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/machines`);
       if (!res.ok) throw new Error('Failed to fetch machines');
       const data = await res.json();
       console.log('data:', data);
@@ -186,13 +187,13 @@ const MachineManager: React.FC<MachineManagerProps> = ({ autoOpen, onSuccess, de
 
       let res;
       if (editingMachine) {
-        res = await fetch(`${API_BASE_URL}/machines/${editingMachine.machine_id}`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/machines/${editingMachine.machine_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/machines`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/machines`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

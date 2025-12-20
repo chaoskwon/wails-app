@@ -3,6 +3,7 @@ import { Button, Form, Input, Select, Switch, Space, message, Card, Spin, AutoCo
 import { SaveOutlined, ReloadOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { Partner, Machine, ApiAccount, Printer, Shipper } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -31,10 +32,10 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
 
   const fetchBasicData = async () => {
     try {
-      const resPartners = await fetch(`${API_BASE_URL}/partners`);
+      const resPartners = await fetchWithAuth(`${API_BASE_URL}/partners`);
       if (resPartners.ok) setPartners(await resPartners.json());
 
-      const resAccounts = await fetch(`${API_BASE_URL}/accounts`);
+      const resAccounts = await fetchWithAuth(`${API_BASE_URL}/accounts`);
       if (resAccounts.ok) setAccounts(await resAccounts.json());
     } catch (e) { console.error(e); }
   };
@@ -73,7 +74,7 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
   const fetchMachineData = async (uuid: string) => {
     if (!uuid) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/machines`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/machines`);
       if (!res.ok) throw new Error('Failed to fetch machines');
       const data: Machine[] = await res.json();
       const found = data.find(m => m.machine_uuid === uuid);
@@ -123,7 +124,7 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
 
   const fetchShippers = async (accId: number) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/shippers?account_id=${accId}`);
+      const response = await fetchWithAuth(`${API_BASE_URL}/shippers?account_id=${accId}`);
       if (response.ok) {
         const data = await response.json();
         const sortedData = data.sort((a: Shipper, b: Shipper) => {
@@ -152,7 +153,7 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
     if (!accountId) return;
     try {
       message.loading({ content: '화주 정보를 수집 중입니다...', key: 'syncShippers' });
-      const response = await fetch(`${API_BASE_URL}/shippers/sync`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/shippers/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: accountId }),
@@ -210,13 +211,13 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
 
       let res;
       if (machine) {
-        res = await fetch(`${API_BASE_URL}/machines/${machine.machine_id}`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/machines/${machine.machine_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/machines`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/machines`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

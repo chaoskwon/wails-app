@@ -11,6 +11,7 @@ import { API_BASE_URL } from './config';
 import { ApiAccount } from './types';
 import AdminSettingsPage from './AdminSettingsPage';
 import { Quit } from '../wailsjs/runtime/runtime';
+import { fetchWithAuth } from './utils/api';
 
 // Create Context for Global Defaults
 export const AppContext = createContext<{
@@ -85,8 +86,16 @@ function App() {
     const connect = () => {
       if (isOnlineRef.current) return;
 
+      const uuid = localStorage.getItem('AUTH_MACHINE_UUID');
+      const machineId = localStorage.getItem('AUTH_MACHINE_ID');
+      let finalWsUrl = wsUrl;
+
+      if (uuid && machineId) {
+        finalWsUrl += `?machine_uuid=${uuid}&machine_id=${machineId}`;
+      }
+
       // @ts-ignore
-      window['go']['main']['App']['ConnectWebSocket'](wsUrl).then((res: string) => {
+      window['go']['main']['App']['ConnectWebSocket'](finalWsUrl).then((res: string) => {
         if (res === "Connected") {
           setIsOnline(true);
           isOnlineRef.current = true;
@@ -119,6 +128,7 @@ function App() {
     }, 5000);
 
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchVersion = async () => {
@@ -131,6 +141,10 @@ function App() {
       }
     } catch (e) {
       console.error("Failed to fetch version", e);
+      Modal.error({
+        title: '버전 정보 로드 실패',
+        content: `버전 정보를 가져오는 중 오류가 발생했습니다.\n${e}`,
+      });
     }
   };
 
@@ -146,6 +160,10 @@ function App() {
       }
     } catch (e) {
       console.error("Update check failed", e);
+      Modal.error({
+        title: '업데이트 확인 실패',
+        content: `업데이트 확인 중 오류가 발생했습니다.\n${e}`,
+      });
     }
   };
 
@@ -160,7 +178,7 @@ function App() {
 
       if (!uuid) return;
 
-      const res = await fetch(`${API_BASE_URL}/machines`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/machines`);
       if (res.ok) {
         const machines: any[] = await res.json();
         const machine = machines.find(m => m.machine_uuid === uuid);
@@ -170,6 +188,11 @@ function App() {
             setIsApprovalModalOpen(true);
             return;
           }
+
+          // Save credential for API calls
+          localStorage.setItem('AUTH_MACHINE_UUID', machine.machine_uuid);
+          localStorage.setItem('AUTH_MACHINE_ID', machine.machine_id.toString());
+
           setCurrentMachine(machine);
           setMachineName(machine.machine_name);
           setDefaultPartnerId(machine.partner_id);
@@ -187,13 +210,17 @@ function App() {
         }
       }
     } catch (e) {
-      console.error("Failed to check registration", e);
+      Modal.error({
+        title: '장비 등록 확인 실패',
+        content: `장비 등록 확인 중 오류가 발생했습니다.\n${e}`,
+        onOk: () => Quit(),
+      });
     }
   };
 
   const handleStartupAccountCheck = async (machine: any) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/accounts`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/accounts`);
       if (res.ok) {
         const accounts: ApiAccount[] = await res.json();
         const partnerAccounts = accounts.filter(a => a.partner_id === machine.partner_id);
@@ -214,19 +241,27 @@ function App() {
         setActiveTab('5');
       }
     } catch (e) {
-      console.error("Failed to check startup accounts", e);
+      Modal.error({
+        title: 'API 계정 확인 실패',
+        content: `API 계정 확인 중 오류가 발생했습니다.\n${e}`,
+        onOk: () => Quit(),
+      });
     }
   };
 
   const fetchPartnerName = async (partnerId: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/partners/${partnerId}`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/partners/${partnerId}`);
       if (res.ok) {
         const partner = await res.json();
         setPartnerName(partner.partner_name);
       }
     } catch (e) {
-      console.error("Failed to fetch partner", e);
+      Modal.error({
+        title: '파트너 정보 확인 실패',
+        content: `파트너 정보 확인 중 오류가 발생했습니다.\n${e}`,
+        onOk: () => Quit(),
+      });
     }
   };
 
@@ -234,14 +269,6 @@ function App() {
     setActiveTab('1'); // Go to Single Pack
     setAutoOpenMachine(false); // Reset auto open flag
     checkRegistration(); // Refresh info
-  };
-
-  // 하단 통계 수치 (더미)
-  const stats = {
-    todayWork: 0,
-    count: 1,
-    unshipped: 1,
-    shipped: 0
   };
 
   const items = [

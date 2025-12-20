@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, Space, message, Switch, Tag } from '
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { Wbs } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const WbsManager = () => {
   const [wbsList, setWbsList] = useState<Wbs[]>([]);
@@ -12,7 +13,7 @@ const WbsManager = () => {
 
   const fetchWbs = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/wbs`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/wbs`);
       if (!res.ok) throw new Error('Failed to fetch WBS');
       const data = await res.json();
       setWbsList(data);
@@ -31,13 +32,13 @@ const WbsManager = () => {
 
       let res;
       if (editingWbs) {
-        res = await fetch(`${API_BASE_URL}/wbs/${editingWbs.wbs_id}`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/wbs/${editingWbs.wbs_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(values),
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/wbs`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/wbs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(values),

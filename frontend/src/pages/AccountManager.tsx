@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, Row, Col, message, Ta
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { ApiAccount, Partner, Wbs } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -20,8 +21,8 @@ const AccountManager = () => {
   const fetchBasicData = async () => {
     try {
       const [pRes, wRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/partners`),
-        fetch(`${API_BASE_URL}/wbs`)
+        fetchWithAuth(`${API_BASE_URL}/partners`),
+        fetchWithAuth(`${API_BASE_URL}/wbs`)
       ]);
       if (pRes.ok) setPartners(await pRes.json());
       if (wRes.ok) setWbsList(await wRes.json());
@@ -30,7 +31,7 @@ const AccountManager = () => {
 
   const fetchAccounts = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/accounts`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/accounts`);
       if (!res.ok) throw new Error('Failed to fetch accounts');
       setAccounts(await res.json());
     } catch (err) {
@@ -53,13 +54,13 @@ const AccountManager = () => {
 
       let res;
       if (editingAccount) {
-        res = await fetch(`${API_BASE_URL}/accounts/${editingAccount.account_id}`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/accounts/${editingAccount.account_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(values),
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/accounts`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/accounts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(values),
@@ -84,7 +85,7 @@ const AccountManager = () => {
   const handleDelete = async (id: number) => {
     if (!window.confirm('정말 삭제하시겠습니까?')) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/accounts/${id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`${API_BASE_URL}/accounts/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete');
       message.success('삭제되었습니다.');
       fetchAccounts();

@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, Switch, Space, Tag, message } from '
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { Partner } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const PartnerManager = () => {
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -12,7 +13,7 @@ const PartnerManager = () => {
 
   const fetchPartners = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/partners`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/partners`);
       if (!res.ok) throw new Error('Failed to fetch partners');
       const data = await res.json();
       // Convert 'Y'/'N' to boolean
@@ -36,13 +37,13 @@ const PartnerManager = () => {
 
       let res;
       if (editingPartner) {
-        res = await fetch(`${API_BASE_URL}/partners/${editingPartner.partner_id}`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/partners/${editingPartner.partner_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/partners`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/partners`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -66,7 +67,7 @@ const PartnerManager = () => {
   const handleDelete = async (id: number) => {
     if (!window.confirm('정말 삭제하시겠습니까?')) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/partners/${id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`${API_BASE_URL}/partners/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete');
       message.success('삭제되었습니다.');
       fetchPartners();

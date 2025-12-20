@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { API_BASE_URL } from './config';
 import { AppContext } from './App';
 import { playErrorSound, playSuccessSound } from './utils/sound';
+import { fetchWithAuth } from './utils/api';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -19,7 +20,6 @@ const SinglePack: React.FC = () => {
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('day'), dayjs().endOf('day')]);
   const inputRef = React.useRef<InputRef>(null);
 
-  // Renamed to messageModal to support both success and error
   const [messageModal, setMessageModal] = useState<{ visible: boolean; message: string; type: 'success' | 'error' }>({ visible: false, message: '', type: 'error' });
 
   useEffect(() => {
@@ -58,6 +58,7 @@ const SinglePack: React.FC = () => {
   };
 
   const showError = (msg: string) => {
+    playErrorSound();
     showMessageModal(msg, 'error');
   };
 
@@ -90,7 +91,7 @@ const SinglePack: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE_URL}/shippers`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/shippers`);
       if (res.ok) {
         const allShippers: any[] = await res.json();
         let filtered = allShippers.filter(s => s.account_id === accountId);
@@ -122,7 +123,7 @@ const SinglePack: React.FC = () => {
         url += `&shipper_code=${selectedShipper}`;
       }
 
-      const res = await fetch(url);
+      const res = await fetchWithAuth(url);
       if (!res.ok) {
         throw new Error("Failed to fetch orders");
       }
@@ -168,6 +169,7 @@ const SinglePack: React.FC = () => {
 
   const [scanResult, setScanResult] = useState<{
     status: 'idle' | 'success' | 'error';
+    orderId?: bigint;
     message?: string;
     waybillNo?: string;
     productCode?: string;
@@ -177,7 +179,7 @@ const SinglePack: React.FC = () => {
   }>({ status: 'idle' });
 
   const handleReprint = async (targetPrinterName: string) => {
-    if (!scanResult.waybillNo) {
+    if (!scanResult.waybillNo || scanResult.orderId === undefined) {
       message.warning('재발행할 운송장 정보가 없습니다.');
       return;
     }
@@ -193,64 +195,39 @@ const SinglePack: React.FC = () => {
       targetIP = printerMainIP;
     } else if (targetPrinterName === printerAux) {
       targetIP = printerAuxIP;
+    } else {
+      message.warning("프린터 ip가 설정되지 않았습니다.");
+      return;
     }
-
+    console.log("1------")
+    console.log("targetIP", targetIP)
+    console.log("scanResult.zplString", scanResult.zplString)
     try {
-      // Method 1: Try PrintZPL if IP and ZPL are available
-      if (targetIP && scanResult.zplString) {
-        // @ts-ignore
-        const resZPL = await window['go']['main']['App']['PrintZPL'](targetIP, scanResult.zplString);
-        if (resZPL === "Success") {
-          message.success("ZPL 운송장 출력 완료");
-          return;
-        } else {
-          console.error("ZPL Print Failed:", resZPL);
-          message.warning("ZPL 출력 실패, HTML 방식으로 재시도합니다: " + resZPL);
-          // Fall through to HTML print
-        }
-      }
-
-      // Method 2: HTML Print (Fallback or Default)
-      let htmlContent = "";
-
-      // 1. Try Invoice URL if available
-      if (scanResult.invoiceUrl) {
+      // Method 1: Try PrintZPL if IP is available (Fetch fresh ZPL)
+      if (targetIP) {
+        console.log("2-----------------------ZPL Print Start (fetching fresh ZPL)");
         try {
-          const res = await fetch(scanResult.invoiceUrl, { cache: 'no-cache' });
-          if (res.ok) {
-            htmlContent = await res.text();
+          // @ts-ignore
+          const reprintRes = await window['go']['main']['App']['GetReprintZPL'](scanResult.orderId, scanResult.waybillNo);
+          if (reprintRes && reprintRes.zpl_string) {
+            // @ts-ignore
+            const resZPL = await window['go']['main']['App']['PrintZPL'](targetIP, reprintRes.zpl_string);
+            if (resZPL === "Success") {
+              message.success("ZPL 운송장 재출력 완료");
+              return;
+            } else {
+              console.error("ZPL Print Failed:", resZPL);
+              message.error("재발행 중 오류가 발생했습니다.");
+            }
+          } else {
+            console.warn("No ZPL string returned from server");
+            message.error("재발행 중 오류가 발생했습니다.");
           }
         } catch (e) {
-          console.warn("Resort to fallback API");
+          console.error("Failed to fetch fresh ZPL:", e);
+          message.error("재발행 중 오류가 발생했습니다.");
         }
       }
-
-      // 2. Fallback API
-      if (!htmlContent) {
-        const fallbackUrl = `${API_BASE_URL}/orders/invoice-image?waybill_no=${scanResult.waybillNo}`;
-        const res = await fetch(fallbackUrl);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.html) {
-            htmlContent = data.html;
-          }
-        }
-      }
-
-      if (!htmlContent) {
-        message.error("운송장 정보를 불러올 수 없습니다.");
-        return;
-      }
-
-      // 3. Print HTML to Target Printer
-      // @ts-ignore
-      const resMain = await window['go']['main']['App']['PrintInvoice'](targetPrinterName, htmlContent);
-      if (resMain !== "Success") {
-        message.error("프린터 출력 실패: " + resMain);
-      } else {
-        message.success("재발행 요청이 완료되었습니다.");
-      }
-
     } catch (err) {
       console.error(err);
       message.error("재발행 중 오류가 발생했습니다.");
@@ -268,11 +245,12 @@ const SinglePack: React.FC = () => {
         url += `&machine_id=${machineId}`;
       }
 
-      const res = await fetch(url);
+      const res = await fetchWithAuth(url);
       if (res.ok) {
         const data = await res.json();
         const mappedData = data.map((item: any, index: number) => ({
           key: `comp_${index}`,
+          id: item.id,
           status: getStatusText(item.work_flag),
           waybillNo: item.waybill_no,
           productCode: item.product_cd,
@@ -334,193 +312,141 @@ const SinglePack: React.FC = () => {
     { title: '출력횟수', dataIndex: 'printCount', key: 'printCount', width: 80 },
   ];
 
-  // REMOVED DUPLICATE scanResult DECLARATION AND INIT
-  // Reusing the one declared above but we need to remove the duplicate block if exists in original
-  // Original code had `const [scanResult, setScanResult] = useState...` at line 303.
-  // My replacement target spans from 67 down to ... 418? 
-  // Wait, I am replacing lines 67-418. That includes the original `scanResult` declaration. 
-  // So I should include it in my replacement content.
-  // Wait, the `scanResult` declaration was at line 303 in the original file. 
-  // My previous replacement block ended at 418. 
-  // SO I must ensure `scanResult` is declared correctly in the new block.
-  // I see I declared it in the provided replacement content. Good.
-
   const handleScan = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      const productCodeInput = e.currentTarget && e.currentTarget.value;
-      if (!productCodeInput) return;
+    if (e.key !== 'Enter') {
+      return;
+    }
 
-      // Use local variable for clearing later, or ref
-      const setProductCodeInput = (val: string) => {
-        val && (e.currentTarget.value = val);
-      };
+    const inputElement = e.currentTarget;
 
-      if (!partnerId || !accountId) {
-        showError('API 계정을 선택해주세요.');
-        return;
-      }
+    const productCodeInput = inputElement && inputElement.value;
+    if (!productCodeInput) return;
+    if (!partnerId || !accountId) {
+      showError('API 계정을 선택해주세요.');
+      return;
+    }
 
-      const inputElement = e.currentTarget;
+    // 1. 스캔한 상품코드가 화면 조회내역에 있는지 체크한다.
+    const matchingOrders = orders.filter(o => o.productCode === productCodeInput);
+    if (matchingOrders.length === 0) {
+      showError('작업할 상품이 없습니다.');
+      return;
+    }
 
-      try {
-        // 1. Check if product exists in orders
-        const matchingOrders = orders.filter(o => o.productCode === productCodeInput);
+    // 2. '대기' 상태인지 체크한다.
+    const pendingOrder = matchingOrders.find(o => o.status === '대기');
+    if (!pendingOrder) {
+      const firstMatch = matchingOrders[0];
+      showError(`이미 ${firstMatch.status} 되었습니다.`);
+      return;
+    }
 
-        if (matchingOrders.length === 0) {
-          showError('작업할 상품이 없습니다.');
-          return;
-        }
+    try {
+      const targetIP = printerMainIP;
+      const orderId = pendingOrder.orderId;
+      const targetWaybillNo = pendingOrder.waybillNo;
+      const startDate = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
+      const endDate = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
+      const shipperCode = selectedShipper || '';
 
-        // 2. Check for '대기' status
-        const pendingOrder = matchingOrders.find(o => o.status === '대기');
+      console.log("Scan Start:", startDate);
+      console.log("Scan End:", endDate);
+      console.log("Shipper Code:", shipperCode);
+      console.log("Waybill No:", targetWaybillNo);
+      console.log("Product Code:", productCodeInput);
+      console.log("Machine ID:", machineId || 0);
 
-        let targetWaybillNo = '';
+      const result = await (window as any)['go']['main']['App']['ScanBarcodeWS'](
+        targetWaybillNo,
+        startDate,
+        endDate,
+        shipperCode,
+        productCodeInput,
+        orderId,
+        machineId || 0,
+        accountId || 0,
+        templateId || '',
+      );
 
-        if (pendingOrder) {
-          targetWaybillNo = pendingOrder.waybillNo;
-        } else {
-          // No pending order found, show status of the first match (or generic message)
-          const firstMatch = matchingOrders[0];
-          showError(`이미 ${firstMatch.status} 되었습니다.`);
-          return;
-        }
+      console.log("Scan Result:", result);
 
-        // Determine target printer
-        const targetPrinter = printerMain;
-        const targetIP = printerMainIP; // Grab IP for initial print
+      if (result.success) {
+        setScanResult({
+          status: 'success',
+          orderId: result.order_id,
+          waybillNo: result.waybill_no,
+          zplString: result.zpl_string    // Store ZPL string
+        });
 
-        // WebSocket Scan with resolved WaybillNo
-        // @ts-ignore
-        const orderNo = pendingOrder.orderNo;
-        const startDate = dateRange[0].format('YYYY-MM-DD HH:mm') + ":00";
-        const endDate = dateRange[1].format('YYYY-MM-DD HH:mm') + ":59";
-        const shipperCode = selectedShipper || '';
-
-        console.log("Scan Start:", startDate);
-        console.log("Scan End:", endDate);
-        console.log("Shipper Code:", shipperCode);
-        console.log("Waybill No:", targetWaybillNo);
-        console.log("Product Code:", productCodeInput);
-        console.log("Machine ID:", machineId || 0);
-
-        const result = await (window as any)['go']['main']['App']['ScanBarcodeWS'](
-          orderNo,
-          startDate,
-          endDate,
-          shipperCode,
-          targetWaybillNo,
-          productCodeInput,
-          machineId || 0,
-          accountId || 0,
-          templateId || '',
-        );
-
-        console.log("Scan Result:", result);
-
-        if (result.success) {
-          setScanResult({
-            status: 'success',
-            waybillNo: result.waybill_no,
-            productCode: productCodeInput,
-            productName: result.product_name,
-            invoiceUrl: result.invoice_url, // Store invoice URL
-            zplString: result.zpl_string    // Store ZPL string
-          });
-
-          // Print ZPL if exists and IP is available
-          if (result.zpl_string && targetIP) {
-            // ZPL Print Priority
-            try {
-              // @ts-ignore
-              const printRes = await window['go']['main']['App']['PrintZPL'](targetIP, result.zpl_string);
-              if (printRes !== "Success") {
-                console.error("ZPL Print Failed inside Scan:", printRes);
-                // Fallback to HTML if needed or just error?
-                // User prefers ZPL. If ZPL fails, we can try HTML or show error.
-                // As per request, we just show error properly.
-                message.error(`ZPL 출력 실패: ${printRes}`);
-                playErrorSound();
-              } else {
-                message.success("ZPL 출력 완료");
-                playSuccessSound();
-              }
-            } catch (e) {
-              console.error("PrintZPL Error", e);
-              showError("프린터 통신 오류");
+        // Print ZPL if exists and IP is available
+        if (result.zpl_string && targetIP) {
+          // ZPL Print Priority
+          try {
+            // @ts-ignore
+            const printRes = await window['go']['main']['App']['PrintZPL'](targetIP, result.zpl_string);
+            if (printRes !== "Success") {
+              console.error("ZPL Print Failed inside Scan:", printRes);
+              // Fallback to HTML if needed or just error?
+              // User prefers ZPL. If ZPL fails, we can try HTML or show error.
+              // As per request, we just show error properly.
+              showError(`ZPL 출력 실패: ${printRes}`);
               playErrorSound();
-            }
-          } else if (printerMain) {
-            // Fallback to existing HTML print logic if NO ZPL string or NO IP
-            // Wait, existing logic was relying on PrintInvoice which needs html.
-            // But here we don't have HTML content ready unless we fetch it.
-            // Actually, the original code had HTML fetching logic inside handleScan?
-            // No, original code seemed to only call PrintZPL (variable name was printRes) but logic was mixed.
-            // Oh, previously PrintInvoice was called inside handleScan?
-            // Let's check original lines 393-410.
-            // It called `PrintZPL` actually! Wait, in previous reads, `PrintZPL` existed?
-            // Ah, looking at previous context, `PrintZPL` was added recently.
-            // Before that, `SinglePack.tsx` lines 396 was: `await window['go']['main']['App']['PrintZPL'](printerMain, result.zpl_string);`
-            // So it WAS already trying to use `PrintZPL` but with printer NAME.
-            // And now `PrintZPL` requires IP.
-            // So I just need to fix the argument to be IP.
-            // And if IP is missing, maybe fallback to `PrintInvoice`?
-            // But `scanResult` update usually happens after print.
-
-            // Correct Logic:
-            // If IP + ZPL -> PrintZPL
-            // If No IP but Printer Name -> PrintInvoice (HTML)
-            // But to PrintInvoice we need HTML. `ScanResponseData` has `InvoiceURL`.
-            // We would need to fetch it.
-
-            // Let's simplify:
-            // If ZPL+IP available -> use it.
-            // Else -> try Fetch HTML -> PrintInvoice.
-
-            if (!result.zpl_string && printerMain) {
-              // Try HTML fallback immediately?
-              // Fetch HTML
-              if (result.invoice_url) {
-                try {
-                  const res = await fetch(result.invoice_url);
-                  if (res.ok) {
-                    const html = await res.text();
-                    // @ts-ignore
-                    await window['go']['main']['App']['PrintInvoice'](printerMain, html);
-                  }
-                } catch (e) { }
-              }
-              playSuccessSound();
             } else {
+              message.success("ZPL 출력 완료");
               playSuccessSound();
             }
+          } catch (e) {
+            console.error("PrintZPL Error", e);
+            showError("프린터 통신 오류");
+            playErrorSound();
+          }
+        } else if (printerMain) {
+          if (!result.zpl_string && printerMain) {
+            // Try HTML fallback immediately?
+            // Fetch HTML
+            if (result.invoice_url) {
+              try {
+                const res = await fetchWithAuth(result.invoice_url);
+                if (res.ok) {
+                  const html = await res.text();
+                  // @ts-ignore
+                  await window['go']['main']['App']['PrintInvoice'](printerMain, html);
+                }
+              } catch (e) {
+                showError(`HTML 출력 실패: ${e}`);
+                playErrorSound();
+              }
+            }
+            playSuccessSound();
           } else {
             playSuccessSound();
           }
-          setProductCodeInput(""); // Clear input
-          setProductCodeInput(""); // Clear input
-          fetchOrders(); // Refresh list
-          fetchCompletedOrders(); // Refresh completed list
-
         } else {
-          throw new Error(result.message);
+          playSuccessSound();
         }
-      } catch (err: any) {
-        console.error("Scan Failed:", err);
-        const errMsg = err.message || 'Scan Failed';
+        // setProductCodeInput(""); // Clear input
+        fetchOrders(); // Refresh list
+        fetchCompletedOrders(); // Refresh completed list
 
-        if (errMsg.includes("not connected")) {
-          setIsOnline(false);
-        }
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (err: any) {
+      console.error("Scan Failed:", err);
+      const errMsg = err.message || 'Scan Failed';
 
-        setScanResult({
-          status: 'error',
-          message: errMsg
-        });
-        showError(errMsg);
-      } finally {
-        if (inputElement) {
-          inputElement.select();
-        }
+      if (errMsg.includes("not connected")) {
+        setIsOnline(false);
+      }
+
+      setScanResult({
+        status: 'error',
+        message: errMsg
+      });
+      showError(errMsg);
+    } finally {
+      if (inputElement) {
+        inputElement.select();
       }
     }
   };
@@ -536,7 +462,7 @@ const SinglePack: React.FC = () => {
       const startDate = dateRange[0].format('YYYY-MM-DD');
       const endDate = dateRange[1].format('YYYY-MM-DD');
 
-      const res = await fetch(`${API_BASE_URL}/orders/sync`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/orders/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -581,7 +507,7 @@ const SinglePack: React.FC = () => {
 
     try {
       setShippingLoading(true);
-      const res = await fetch(`${API_BASE_URL}/orders/shipping`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/orders/shipping`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -622,6 +548,7 @@ const SinglePack: React.FC = () => {
       // Keeping 'success' to make it green OK or just reusing the display logic.
       // Actually, if we just want to show info, maybe 'idle' is better but the user might want to see it prominent.
       // scanResult controls the big box.
+      orderId: record.id,
       waybillNo: record.waybillNo,
       productCode: record.productCode,
       productName: record.productName,
@@ -812,6 +739,7 @@ const SinglePack: React.FC = () => {
                 dataSource={completedOrders} // Fetched from API
                 columns={[
                   { title: '상태', dataIndex: 'status', width: 60 },
+                  // { title: '오더id', dataIndex: 'id', width: 120 },
                   { title: '운송장번호', dataIndex: 'waybillNo', width: 120 },
                   { title: '상품코드', dataIndex: 'productCode', width: 80 },
                   { title: '상품명', dataIndex: 'productName', width: 150, ellipsis: true },

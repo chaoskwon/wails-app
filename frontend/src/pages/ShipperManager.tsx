@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, Select, Space, Alert, message } from
 import { PlusOutlined, EditOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { Partner, ApiAccount, Shipper, Wbs } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const { Option } = Select;
 
@@ -21,9 +22,9 @@ const ShipperManager = () => {
   const fetchBasicData = async () => {
     try {
       const [pRes, aRes, wRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/partners`),
-        fetch(`${API_BASE_URL}/accounts`),
-        fetch(`${API_BASE_URL}/wbs`)
+        fetchWithAuth(`${API_BASE_URL}/partners`),
+        fetchWithAuth(`${API_BASE_URL}/accounts`),
+        fetchWithAuth(`${API_BASE_URL}/wbs`)
       ]);
       if (pRes.ok) setPartners(await pRes.json());
       if (aRes.ok) setAccounts(await aRes.json());
@@ -33,7 +34,7 @@ const ShipperManager = () => {
 
   const fetchShippers = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/shippers`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/shippers`);
       if (!res.ok) throw new Error('Failed to fetch shippers');
       setShippers(await res.json());
     } catch (err) {
@@ -125,7 +126,7 @@ const ShipperManager = () => {
 
     message.loading({ content: '서버에서 화주 목록을 가져오는 중...', key: 'syncShippers' });
     try {
-      const res = await fetch(`${API_BASE_URL}/shippers/sync`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/shippers/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
