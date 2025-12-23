@@ -191,10 +191,13 @@ const SinglePack: React.FC = () => {
 
     // Determine target IP based on targetPrinterName
     let targetIP = "";
+    let printerType = "MAIN";
     if (targetPrinterName === printerMain) {
       targetIP = printerMainIP;
+      printerType = "MAIN";
     } else if (targetPrinterName === printerAux) {
       targetIP = printerAuxIP;
+      printerType = "AUX";
     } else {
       message.warning("프린터 ip가 설정되지 않았습니다.");
       return;
@@ -205,15 +208,17 @@ const SinglePack: React.FC = () => {
     try {
       // Method 1: Try PrintZPL if IP is available (Fetch fresh ZPL)
       if (targetIP) {
-        console.log("2-----------------------ZPL Print Start (fetching fresh ZPL)");
         try {
           // @ts-ignore
-          const reprintRes = await window['go']['main']['App']['GetReprintZPL'](scanResult.orderId, scanResult.waybillNo);
+          const reprintRes = await window['go']['main']['App']['GetReprintZPL'](scanResult.orderId, scanResult.waybillNo, printerType);
           if (reprintRes && reprintRes.zpl_string) {
             // @ts-ignore
             const resZPL = await window['go']['main']['App']['PrintZPL'](targetIP, reprintRes.zpl_string);
             if (resZPL === "Success") {
+              // @ts-ignore
+              await window['go']['main']['App']['SendIncreaseReprintCount'](scanResult.orderId, printerType === "AUX");
               message.success("ZPL 운송장 재출력 완료");
+
               return;
             } else {
               console.error("ZPL Print Failed:", resZPL);
@@ -383,7 +388,7 @@ const SinglePack: React.FC = () => {
           // ZPL Print Priority
           try {
             // @ts-ignore
-            const printRes = await window['go']['main']['App']['PrintZPL'](targetIP, result.zpl_string);
+            const printRes = await window['go']['main']['App']['PrintZPL'](targetIP, result.zpl_string, result.order_id, "MAIN");
             if (printRes !== "Success") {
               console.error("ZPL Print Failed inside Scan:", printRes);
               // Fallback to HTML if needed or just error?

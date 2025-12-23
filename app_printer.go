@@ -106,8 +106,14 @@ func (a *App) PrintZPL(printerIP string, zplData string) string {
 	a.printLock.Lock()
 	defer a.printLock.Unlock()
 
+	// Helper to log and return error
+	retErr := func(msg string) string {
+		go a.sendErrorLog("PRINTER", msg) // Send async to avoid blocking
+		return msg
+	}
+
 	if printerIP == "" {
-		return "Error: Printer IP is empty"
+		return retErr("Error: Printer IP is empty")
 	}
 
 	target := printerIP
@@ -127,38 +133,34 @@ func (a *App) PrintZPL(printerIP string, zplData string) string {
 		return nil
 	}
 
-	// Try to use existing connection
 	if a.printerConn == nil {
 		if err := connect(); err != nil {
-			return fmt.Sprintf("Error connecting to printer: %v", err)
+			return retErr(fmt.Sprintf("Error connecting to printer: %v", err))
 		}
 	}
 
-	// Set write deadline
 	if err := a.printerConn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		a.printerConn.Close()
 		a.printerConn = nil
-		return fmt.Sprintf("Error setting deadline: %v", err)
+		return retErr(fmt.Sprintf("Error setting deadline: %v", err))
 	}
 
-	// Send ZPL
 	_, err := a.printerConn.Write([]byte(zplData))
 	if err != nil {
-		// Retry once
 		fmt.Println("Write failed, reconnecting...", err)
 		if err := connect(); err != nil {
-			return fmt.Sprintf("Error reconnecting: %v", err)
+			return retErr(fmt.Sprintf("Error reconnecting: %v", err))
 		}
 		if err := a.printerConn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			a.printerConn.Close()
 			a.printerConn = nil
-			return fmt.Sprintf("Error setting deadline retry: %v", err)
+			return retErr(fmt.Sprintf("Error setting deadline retry: %v", err))
 		}
 		_, err = a.printerConn.Write([]byte(zplData))
 		if err != nil {
 			a.printerConn.Close()
 			a.printerConn = nil
-			return fmt.Sprintf("Error sending ZPL after retry: %v", err)
+			return retErr(fmt.Sprintf("Error sending ZPL after retry: %v", err))
 		}
 	}
 
