@@ -4,29 +4,53 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
-	"runtime"
-	"strings"
 	"sync"
-	"time"
 
-	"github.com/blang/semver"
-	"github.com/rhysd/go-github-selfupdate/selfupdate"
+	"github.com/gorilla/websocket"
 )
 
-const Version = "0.1.0"
+var Version = "1.0.0"
 
 // App struct
 type App struct {
 	ctx         context.Context
 	printerConn net.Conn
 	printLock   sync.Mutex
+
+	// WebSocket
+	wsConn      *websocket.Conn
+	wsLock      sync.Mutex
+	wsRequests  map[string]chan ScanResponseData
+	wsReqLock   sync.Mutex
+	isConnected bool
+	activeWSURL string
+}
+
+// WSMessage structure (same as backend)
+type WSMessage struct {
+	Type      string      `json:"type"`
+	RequestID string      `json:"request_id"`
+	Data      interface{} `json:"data"`
+}
+
+// ScanResponseData structure (same as backend)
+type ScanResponseData struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	OrderId     int64  `json:"order_id"`
+	OrderNo     string `json:"order_no"`
+	ProductName string `json:"product_name"`
+	WaybillNo   string `json:"waybill_no"`
+	InvoiceURL  string `json:"invoice_url"`
+	ZPLString   string `json:"zpl_string"`
+	WorkFlag    string `json:"work_flag"`
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		wsRequests: make(map[string]chan ScanResponseData),
+	}
 }
 
 // startup is called when the app starts. The context is saved
@@ -38,120 +62,4 @@ func (a *App) startup(ctx context.Context) {
 // Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
-}
-
-// CheckForUpdates checks for updates and applies them if available
-func (a *App) CheckForUpdates() (string, error) {
-	// TODO: Configure the repository slug correctly
-	slug := "chaos/AutoPackingSystem"
-
-	latest, found, err := selfupdate.DetectLatest(slug)
-	if err != nil {
-		return "", fmt.Errorf("error checking for updates: %w", err)
-	}
-	if !found {
-		return "No updates found", nil
-	}
-
-	currentVersion, err := semver.Parse(Version)
-	if err != nil {
-		return "", fmt.Errorf("invalid current version: %w", err)
-	}
-
-	if latest.Version.GT(currentVersion) {
-		// Update found
-		// Note: This performs a binary replacement.
-		// If using an installer, you might want to download the installer asset and run it instead.
-		// For now, we use binary replacement as it is supported by the library.
-
-		// On Windows, the running executable is renamed and the new one is placed.
-		exe, err := os.Executable()
-		if err != nil {
-			return "", fmt.Errorf("could not locate executable path: %w", err)
-		}
-
-		if err := selfupdate.UpdateTo(latest.AssetURL, exe); err != nil {
-			return "", fmt.Errorf("error occurred during update: %w", err)
-		}
-
-		return fmt.Sprintf("Updated to version %s. Please restart the application.", latest.Version), nil
-	}
-
-	return "App is up to date", nil
-}
-
-// GetSystemUUID returns the system UUID
-func (a *App) GetSystemUUID() string {
-	if runtime.GOOS == "darwin" {
-		out, err := exec.Command("bash", "-c", "ioreg -d2 -c IOPlatformExpertDevice | awk -F\\\" '/IOPlatformUUID/{print $(NF-1)}'").Output()
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(string(out))
-	}
-	return "UNKNOWN-UUID"
-}
-
-// PrintZPL sends ZPL data to a network printer using a persistent connection
-func (a *App) PrintZPL(printerIP string, zplData string) string {
-	a.printLock.Lock()
-	defer a.printLock.Unlock()
-
-	if printerIP == "" {
-		return "Error: Printer IP is empty"
-	}
-
-	target := printerIP
-	if !strings.Contains(target, ":") {
-		target = target + ":9100"
-	}
-
-	connect := func() error {
-		if a.printerConn != nil {
-			a.printerConn.Close()
-		}
-		conn, err := net.DialTimeout("tcp", target, 2*time.Second)
-		if err != nil {
-			return err
-		}
-		a.printerConn = conn
-		return nil
-	}
-
-	// Try to use existing connection
-	if a.printerConn == nil {
-		if err := connect(); err != nil {
-			return fmt.Sprintf("Error connecting to printer: %v", err)
-		}
-	}
-
-	// Set write deadline
-	if err := a.printerConn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		a.printerConn.Close()
-		a.printerConn = nil
-		return fmt.Sprintf("Error setting deadline: %v", err)
-	}
-
-	// Send ZPL
-	_, err := a.printerConn.Write([]byte(zplData))
-	if err != nil {
-		// Retry once
-		fmt.Println("Write failed, reconnecting...", err)
-		if err := connect(); err != nil {
-			return fmt.Sprintf("Error reconnecting: %v", err)
-		}
-		if err := a.printerConn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			a.printerConn.Close()
-			a.printerConn = nil
-			return fmt.Sprintf("Error setting deadline retry: %v", err)
-		}
-		_, err = a.printerConn.Write([]byte(zplData))
-		if err != nil {
-			a.printerConn.Close()
-			a.printerConn = nil
-			return fmt.Sprintf("Error sending ZPL after retry: %v", err)
-		}
-	}
-
-	return "Success"
 }

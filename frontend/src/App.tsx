@@ -1,30 +1,45 @@
-import { useState, useEffect, createContext } from 'react';
+import React, { useState, useEffect, createContext } from 'react';
 import './App.css';
+import logo from './assets/images/logo_white.jpeg';
 import { Tabs, message, Tag, Space, Modal, List, Button } from 'antd';
+import { EventsOn } from "../wailsjs/runtime/runtime";
 import SinglePack from './SinglePack';
 import MultiPack from './MultiPack';
 import History from './History';
-import InspectionPage from './InspectionPage';
 import SettingsPage from './SettingsPage';
-import SpeedBaggerLegacy from './SpeedBaggerLegacy';
 import { API_BASE_URL } from './config';
 import { ApiAccount } from './types';
+import AdminSettingsPage from './AdminSettingsPage';
+import { Quit } from '../wailsjs/runtime/runtime';
+import { fetchWithAuth } from './utils/api';
 
 // Create Context for Global Defaults
 export const AppContext = createContext<{
   partnerId: number | null;
   accountId: number | null;
   printerMain: string;
+  printerMainIP: string;
   printerAux: string;
+  printerAuxIP: string;
   templateId: string;
   machineId: number | null;
+  shipper_ids: number[] | null;
+  accountType: string;
+  isOnline: boolean;
+  setIsOnline: (status: boolean) => void;
 }>({
   partnerId: null,
   accountId: null,
   printerMain: '',
+  printerMainIP: '',
   printerAux: '',
+  printerAuxIP: '',
   templateId: '',
-  machineId: null
+  machineId: null,
+  shipper_ids: null,
+  accountType: '',
+  isOnline: false,
+  setIsOnline: () => { },
 });
 
 function App() {
@@ -33,20 +48,105 @@ function App() {
   const [machineName, setMachineName] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [accountName, setAccountName] = useState('');
+  const [appVersion, setAppVersion] = useState('');
 
   // Default IDs for API calls
   const [defaultPartnerId, setDefaultPartnerId] = useState<number | null>(null);
   const [defaultAccountId, setDefaultAccountId] = useState<number | null>(null);
-
-  // Account Selection Modal State
-  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
-  const [availableAccounts, setAvailableAccounts] = useState<ApiAccount[]>([]);
+  const [currentAccountType, setCurrentAccountType] = useState<string>('');
   const [currentMachine, setCurrentMachine] = useState<any>(null);
 
+  // Connection State
+  const [isOnline, setIsOnline] = useState(false);
+
+  // Modal State
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+
+  const handleQuit = () => {
+    Quit();
+  };
+
   useEffect(() => {
-    checkRegistration();
+    fetchVersion();
     checkForUpdates();
+    checkRegistration();
   }, []);
+
+  // Connect WebSocket with Auto-Reconnect
+  const isOnlineRef = React.useRef(false);
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
+
+  useEffect(() => {
+    const wsUrl = API_BASE_URL.replace("http", "ws") + "/ws";
+
+    const connect = () => {
+      if (isOnlineRef.current) return;
+
+      const uuid = localStorage.getItem('AUTH_MACHINE_UUID');
+      const machineId = localStorage.getItem('AUTH_MACHINE_ID');
+      let finalWsUrl = wsUrl;
+
+      if (uuid && machineId) {
+        finalWsUrl += `?machine_uuid=${uuid}&machine_id=${machineId}`;
+      }
+
+      // @ts-ignore
+      window['go']['main']['App']['ConnectWebSocket'](finalWsUrl).then((res: string) => {
+        if (res === "Connected") {
+          setIsOnline(true);
+          isOnlineRef.current = true;
+        } else {
+          setIsOnline(false);
+          isOnlineRef.current = false;
+          console.log("WS Connect Failed:", res);
+        }
+      }).catch((err: any) => {
+        console.error("WS Connect Error:", err);
+        setIsOnline(false);
+        isOnlineRef.current = false;
+      });
+    };
+
+    connect();
+
+    // Listen for disconnect event from Backend (Server-side close)
+    EventsOn("ws:disconnect", () => {
+      console.log("Received ws:disconnect event!");
+      setIsOnline(false);
+      isOnlineRef.current = false;
+    });
+
+    const interval = setInterval(() => {
+      if (!isOnlineRef.current) {
+        console.log("Auto-reconnecting WS...");
+        connect();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchVersion = async () => {
+    try {
+      // @ts-ignore
+      if (window['go'] && window['go']['main'] && window['go']['main']['App'] && window['go']['main']['App']['GetVersion']) {
+        // @ts-ignore
+        const version = await window['go']['main']['App']['GetVersion']();
+        setAppVersion(version);
+      }
+    } catch (e) {
+      console.error("Failed to fetch version", e);
+      Modal.error({
+        title: '버전 정보 로드 실패',
+        content: `버전 정보를 가져오는 중 오류가 발생했습니다.\n${e}`,
+      });
+    }
+  };
 
   const checkForUpdates = async () => {
     try {
@@ -60,6 +160,10 @@ function App() {
       }
     } catch (e) {
       console.error("Update check failed", e);
+      Modal.error({
+        title: '업데이트 확인 실패',
+        content: `업데이트 확인 중 오류가 발생했습니다.\n${e}`,
+      });
     }
   };
 
@@ -74,12 +178,21 @@ function App() {
 
       if (!uuid) return;
 
-      const res = await fetch(`${API_BASE_URL}/machines`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/machines`);
       if (res.ok) {
         const machines: any[] = await res.json();
         const machine = machines.find(m => m.machine_uuid === uuid);
 
         if (machine) {
+          if (machine.is_active !== 'Y') {
+            setIsApprovalModalOpen(true);
+            return;
+          }
+
+          // Save credential for API calls
+          localStorage.setItem('AUTH_MACHINE_UUID', machine.machine_uuid);
+          localStorage.setItem('AUTH_MACHINE_ID', machine.machine_id.toString());
+
           setCurrentMachine(machine);
           setMachineName(machine.machine_name);
           setDefaultPartnerId(machine.partner_id);
@@ -97,109 +210,59 @@ function App() {
         }
       }
     } catch (e) {
-      console.error("Failed to check registration", e);
+      Modal.error({
+        title: '장비 등록 확인 실패',
+        content: `장비 등록 확인 중 오류가 발생했습니다.\n${e}`,
+        onOk: () => Quit(),
+      });
     }
   };
 
   const handleStartupAccountCheck = async (machine: any) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/accounts`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/accounts`);
       if (res.ok) {
         const accounts: ApiAccount[] = await res.json();
         const partnerAccounts = accounts.filter(a => a.partner_id === machine.partner_id);
 
-        if (partnerAccounts.length === 1) {
-          // Only one account: Auto-select
-          const account = partnerAccounts[0];
-          if (machine.account_id !== account.account_id) {
-            // Update DB if different
-            await updateMachineAccount(machine, account);
-          } else {
-            // Just set state
-            setDefaultAccountId(account.account_id);
-            setAccountName(account.account_name);
-            message.success(`API 계정 '${account.account_name}'이(가) 자동 선택되었습니다.`);
+        // 1. Check if machine already has a valid account_id set
+        if (machine.account_id) {
+          const configuredAccount = partnerAccounts.find(a => a.account_id === machine.account_id);
+          if (configuredAccount) {
+            setDefaultAccountId(configuredAccount.account_id);
+            setAccountName(configuredAccount.account_name);
+            setCurrentAccountType(configuredAccount.account_type);
+            // message.success(`API 계정 '${configuredAccount.account_name}'이(가) 설정되었습니다.`);
+            return; // Skip modal
           }
-        } else if (partnerAccounts.length > 1) {
-          // Multiple accounts: Show Modal (Every time at startup)
-          setAvailableAccounts(partnerAccounts);
-          setIsAccountModalOpen(true);
-
-          // If already set, we can show it as current, but we still force selection/confirmation
-          if (machine.account_id) {
-            const current = partnerAccounts.find(a => a.account_id === machine.account_id);
-            if (current) setAccountName(current.account_name);
-            setDefaultAccountId(machine.account_id);
-          }
-        } else {
-          // No accounts
-          message.warning('해당 거래처에 등록된 API 계정이 없습니다.');
         }
+        // 2. Fallback: Go to Settings
+        message.warning('API 계정이 설정되지 않았습니다. 설정 페이지로 이동합니다.');
+        setActiveTab('5');
       }
     } catch (e) {
-      console.error("Failed to check startup accounts", e);
-    }
-  };
-
-  const updateMachineAccount = async (machine: any, account: ApiAccount) => {
-    try {
-      const payload = {
-        ...machine,
-        account_id: account.account_id,
-      };
-
-      const res = await fetch(`${API_BASE_URL}/machines/${machine.machine_id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      Modal.error({
+        title: 'API 계정 확인 실패',
+        content: `API 계정 확인 중 오류가 발생했습니다.\n${e}`,
+        onOk: () => Quit(),
       });
-
-      if (res.ok) {
-        setDefaultAccountId(account.account_id);
-        setAccountName(account.account_name);
-        message.success(`API 계정이 '${account.account_name}'(으)로 자동 설정되었습니다.`);
-        // Update current machine state to reflect change
-        setCurrentMachine(payload);
-      }
-    } catch (e) {
-      console.error("Failed to auto-update machine account", e);
     }
   };
 
   const fetchPartnerName = async (partnerId: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/partners/${partnerId}`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/partners/${partnerId}`);
       if (res.ok) {
         const partner = await res.json();
         setPartnerName(partner.partner_name);
       }
     } catch (e) {
-      console.error("Failed to fetch partner", e);
+      Modal.error({
+        title: '파트너 정보 확인 실패',
+        content: `파트너 정보 확인 중 오류가 발생했습니다.\n${e}`,
+        onOk: () => Quit(),
+      });
     }
-  };
-
-  const fetchAccountName = async (accountId: number) => {
-    // This might be redundant if handleStartupAccountCheck handles it, 
-    // but useful if we skip startup check logic (e.g. machine update).
-    // Keeping it for safety or other calls.
-    try {
-      const res = await fetch(`${API_BASE_URL}/accounts`);
-      if (res.ok) {
-        const accounts: any[] = await res.json();
-        const account = accounts.find(a => a.account_id === accountId);
-        if (account) {
-          setAccountName(account.account_name);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to fetch account", e);
-    }
-  };
-
-  const handleAccountSelect = async (account: ApiAccount) => {
-    if (!currentMachine) return;
-    await updateMachineAccount(currentMachine, account);
-    setIsAccountModalOpen(false);
   };
 
   const handleMachineAdded = () => {
@@ -208,40 +271,40 @@ function App() {
     checkRegistration(); // Refresh info
   };
 
-  // 하단 통계 수치 (더미)
-  const stats = {
-    todayWork: 0,
-    count: 1,
-    unshipped: 1,
-    shipped: 0
-  };
-
   const items = [
     { key: '1', label: '단 포', children: <SinglePack /> },
     { key: '2', label: '합 포', children: <MultiPack /> },
     { key: '3', label: '내 역', children: <History /> },
-    { key: '4', label: '검 수 (New)', children: <InspectionPage /> },
-    { key: '5', label: '설 정', children: <SettingsPage autoOpenMachine={autoOpenMachine} onMachineAdded={handleMachineAdded} /> },
-    { key: '6', label: 'SpeedBagger (Legacy)', children: <SpeedBaggerLegacy /> },];
+    { key: '5', label: '설 정', children: <SettingsPage autoOpenMachine={autoOpenMachine} onMachineAdded={handleMachineAdded} partnerId={defaultPartnerId} /> },
+  ];
 
   return (
     <AppContext.Provider value={{
       partnerId: defaultPartnerId,
       accountId: defaultAccountId,
       printerMain: currentMachine?.printer_main || '',
+      printerMainIP: currentMachine?.printer_main_ip || '',
       printerAux: currentMachine?.printer_aux || '',
-      templateId: currentMachine?.template_id || '',
-      machineId: currentMachine?.machine_id || null
+      printerAuxIP: currentMachine?.printer_aux_ip || '',
+      templateId: currentMachine?.waybill_template || '',
+      machineId: currentMachine?.machine_id || null,
+      shipper_ids: currentMachine?.shipper_ids || null,
+      accountType: currentAccountType,
+      isOnline: isOnline,
+      setIsOnline: setIsOnline,
     }}>
       <div className="container">
         {/* 메인 탭 네비게이션 */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 10px', backgroundColor: '#f0f2f5' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            <Space>
-              {partnerName && <Tag color="blue">거래처: {partnerName}</Tag>}
-              {accountName && <Tag color="purple">API계정: {accountName}</Tag>}
-              {machineName && <Tag color="green">장비: {machineName}</Tag>}
-            </Space>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, backgroundColor: '#1E4496', padding: '10px', borderRadius: '8px' }}>
+            <img src={logo} alt="logo" style={{ height: '40px', borderRadius: '4px' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {partnerName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{partnerName}</Tag>}
+              {accountName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{accountName}</Tag>}
+              {machineName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{machineName}</Tag>}
+              <Button type="default" onClick={() => setIsAdminModalOpen(true)} style={{ display: currentMachine?.role === '*' ? 'block' : 'none', backgroundColor: '#F26D24', color: '#fff', border: 'none' }}>어드민설정</Button>
+            </div>
           </div>
           <Tabs
             activeKey={activeTab}
@@ -258,31 +321,36 @@ function App() {
 
         {/* 하단 상태바 */}
         <div className="footer-bar">
-          <span>오늘 작업량: {stats.todayWork}</span>
-          <span>작업건수: {stats.count}</span>
-          <span>미배송처리: {stats.unshipped}</span>
-          <span>배송처리: {stats.shipped}</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {appVersion && <span>v{appVersion}</span>}
+          </div>
         </div>
 
-        {/* Account Selection Modal */}
         <Modal
-          title="API 계정 선택"
-          open={isAccountModalOpen}
-          footer={null}
-          closable={false} // Force selection
+          title="승인 필요"
+          open={isApprovalModalOpen}
+          footer={[
+            <Button key="ok" type="primary" onClick={handleQuit}>
+              확인
+            </Button>
+          ]}
+          closable={false}
           maskClosable={false}
+          centered
         >
-          <p>이 장비에 연결할 API 계정을 선택해주세요.</p>
-          <List
-            dataSource={availableAccounts}
-            renderItem={(item) => (
-              <List.Item>
-                <Button block onClick={() => handleAccountSelect(item)}>
-                  {item.account_name} ({item.api_url})
-                </Button>
-              </List.Item>
-            )}
-          />
+          <p>포장기 프로그램 사용을 위해서는 승인이 필요합니다</p>
+        </Modal>
+
+        {/* Admin Settings Modal */}
+        <Modal
+          title="어드민 설정"
+          open={isAdminModalOpen}
+          onCancel={() => setIsAdminModalOpen(false)}
+          footer={null}
+          width={1000}
+          destroyOnClose
+        >
+          <AdminSettingsPage />
         </Modal>
       </div>
     </AppContext.Provider>

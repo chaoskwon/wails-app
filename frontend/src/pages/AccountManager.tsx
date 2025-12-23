@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, Select, Space, Row, Col, message, Alert } from 'antd';
+import { Table, Button, Modal, Form, Input, Select, Space, Row, Col, message, Tag, Switch, Alert } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../config';
 import { ApiAccount, Partner, Wbs } from '../types';
+import { fetchWithAuth } from '../utils/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -20,8 +21,8 @@ const AccountManager = () => {
   const fetchBasicData = async () => {
     try {
       const [pRes, wRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/partners`),
-        fetch(`${API_BASE_URL}/wbs`)
+        fetchWithAuth(`${API_BASE_URL}/partners`),
+        fetchWithAuth(`${API_BASE_URL}/wbs`)
       ]);
       if (pRes.ok) setPartners(await pRes.json());
       if (wRes.ok) setWbsList(await wRes.json());
@@ -30,7 +31,7 @@ const AccountManager = () => {
 
   const fetchAccounts = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/accounts`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/accounts`);
       if (!res.ok) throw new Error('Failed to fetch accounts');
       setAccounts(await res.json());
     } catch (err) {
@@ -53,13 +54,13 @@ const AccountManager = () => {
 
       let res;
       if (editingAccount) {
-        res = await fetch(`${API_BASE_URL}/accounts/${editingAccount.account_id}`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/accounts/${editingAccount.account_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(values),
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/accounts`, {
+        res = await fetchWithAuth(`${API_BASE_URL}/accounts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(values),
@@ -84,7 +85,7 @@ const AccountManager = () => {
   const handleDelete = async (id: number) => {
     if (!window.confirm('정말 삭제하시겠습니까?')) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/accounts/${id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`${API_BASE_URL}/accounts/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete');
       message.success('삭제되었습니다.');
       fetchAccounts();
@@ -97,8 +98,8 @@ const AccountManager = () => {
     { title: 'ID', dataIndex: 'account_id', width: 50 },
     { title: '계정명', dataIndex: 'account_name', width: 150, render: (t: string) => <span style={{ fontWeight: 'bold' }}>{t}</span> },
     { title: 'WBS', dataIndex: 'wbs_id', render: (id: number) => wbsList.find(w => w.wbs_id === id)?.wbs_name },
-    { title: '도메인키', dataIndex: 'domain_key' },
-    { title: 'API URL', dataIndex: 'api_url' },
+    { title: '계정 타입', dataIndex: 'account_type', render: (v: string) => v === 'ONE' ? '화주' : '3PL' },
+    { title: '사용', dataIndex: 'is_active', render: (v: string) => v === 'Y' ? <Tag color="blue">사용</Tag> : <Tag color="red">미사용</Tag> },
     {
       title: '관리', key: 'action', width: 80,
       render: (_: any, r: any) => (
@@ -106,7 +107,7 @@ const AccountManager = () => {
           <Button icon={<EditOutlined />} size="small" onClick={() => {
             setEditingAccount(r);
             form.resetFields();
-            form.setFieldsValue(r);
+            form.setFieldsValue(r); // is_active is string 'Y'/'N'
             setIsModalOpen(true);
           }} />
         </Space>
@@ -121,7 +122,7 @@ const AccountManager = () => {
     }
     setEditingAccount(null);
     form.resetFields();
-    form.setFieldsValue({ partner_id: selectedPartnerId });
+    form.setFieldsValue({ partner_id: selectedPartnerId, is_active: 'Y' }); // Default new accounts to active
     setIsModalOpen(true);
   };
 
@@ -146,7 +147,7 @@ const AccountManager = () => {
       </div>
 
       {selectedPartnerId ? (
-        <Table dataSource={filteredData} columns={columns} rowKey="account_id" size="small" bordered />
+        <Table dataSource={filteredData} columns={columns} rowKey="account_id" size="small" bordered scroll={{ x: 'max-content' }} />
       ) : (
         <Alert message="거래처를 선택하면 API 계정 목록이 표시됩니다." type="info" showIcon />
       )}
@@ -185,20 +186,21 @@ const AccountManager = () => {
             </Col>
           </Row>
 
-          <Form.Item name="partner_key" label="파트너키 (Partner Key)" rules={[{ required: true, message: '파트너키를 입력해주세요' }]}>
-            <Input />
+          <Form.Item name="account_type" label="계정 타입" rules={[{ required: true }]}>
+            <Select>
+              <Option value="ONE">화주</Option>
+              <Option value="MULTI">3PL</Option>
+            </Select>
           </Form.Item>
-          <Form.Item name="domain_key" label="도메인키 (Domain Key)" rules={[{ required: true, message: '도메인키를 입력해주세요' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="domain_name" label="도메인명 (Domain Name)" rules={[{ required: true, message: '도메인명을 입력해주세요' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="api_url" label="API URL">
-            <Input />
-          </Form.Item>
-          <Form.Item name="mapping_config" label="매핑 설정 (JSON)">
-            <TextArea rows={3} />
+          <Form.Item
+            name="is_active"
+            label="사용 여부"
+            valuePropName="checked"
+            initialValue="Y"
+            getValueProps={(value) => ({ checked: value === 'Y' })}
+            getValueFromEvent={(checked) => checked ? 'Y' : 'N'}
+          >
+            <Switch checkedChildren="사용" unCheckedChildren="미사용" />
           </Form.Item>
         </Form>
       </Modal>
