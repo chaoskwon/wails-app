@@ -20,6 +20,7 @@ export interface ApiAccount {
   partner_key: string;
   domain_key: string;
   account_type: string;
+  waybill_template?: string;
   is_active: string;
 }
 
@@ -52,7 +53,6 @@ export interface Machine {
   role?: string;
   use_inspection?: string;
   shipper_ids?: number[];
-  waybill_template?: string;
   is_active?: string;
 }
 

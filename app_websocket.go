@@ -30,6 +30,9 @@ func (a *App) ConnectWebSocket(url string) string {
 	a.activeWSURL = url
 	fmt.Println("WS: Connection successful!")
 
+	// Flush any queued logs
+	go a.flushLogQueue()
+
 	// Start reading loop
 	go a.readLoop(c)
 
@@ -87,8 +90,9 @@ func (a *App) readLoop(conn *websocket.Conn) {
 					InvoiceURL:  getString(dataMap, "invoice_url"),
 					ZPLString:   getString(dataMap, "zpl_string"),
 					WorkFlag:    getString(dataMap, "work_flag"),
-					OrderId:     int64(dataMap["order_id"].(float64)), // Correctly casting logic for JSON Unmarshal might be needed, using simplistic for now assuming numeric
 				}
+
+				fmt.Println("+++++================", dataMap["order_id"])
 				// Fix JSON number unmarshalling behavior which often defaults to float64
 				if oidVal, ok := dataMap["order_id"]; ok {
 					if oidFloat, ok := oidVal.(float64); ok {
@@ -160,6 +164,9 @@ func (a *App) sendWSRequest(msgType string, data map[string]interface{}) (*ScanR
 
 // ScanBarcodeWS sends a scan request to the WebSocket server
 func (a *App) ScanBarcodeWS(waybillNo, startDate, endDate, shipperCode, productCode string, orderId int64, machineID int, accountID int, templateId string) (*ScanResponseData, error) {
+	// Async log creation
+	go a.sendPackingLogScan(orderId, waybillNo)
+
 	reqData := map[string]interface{}{
 		"waybill_no":  waybillNo,
 		"start_date":  startDate,
@@ -176,7 +183,10 @@ func (a *App) ScanBarcodeWS(waybillNo, startDate, endDate, shipperCode, productC
 }
 
 // GetReprintZPL sends a reprint request to the WebSocket server
-func (a *App) GetReprintZPL(orderID int64, waybillNo string) (*ScanResponseData, error) {
+func (a *App) GetReprintZPL(orderID int64, waybillNo string, printerType string) (*ScanResponseData, error) {
+	// Async log creation
+	go a.sendPackingLogPrint(orderID, printerType)
+
 	if orderID == 0 {
 		return nil, fmt.Errorf("order ID is required")
 	}

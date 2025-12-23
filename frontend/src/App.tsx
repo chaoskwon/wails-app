@@ -53,7 +53,7 @@ function App() {
   // Default IDs for API calls
   const [defaultPartnerId, setDefaultPartnerId] = useState<number | null>(null);
   const [defaultAccountId, setDefaultAccountId] = useState<number | null>(null);
-  const [currentAccountType, setCurrentAccountType] = useState<string>('');
+  const [currentAccount, setCurrentAccount] = useState<ApiAccount | null>(null);
   const [currentMachine, setCurrentMachine] = useState<any>(null);
 
   // Connection State
@@ -154,6 +154,7 @@ function App() {
       if (window['go'] && window['go']['main'] && window['go']['main']['App'] && window['go']['main']['App']['CheckForUpdates']) {
         // @ts-ignore
         const result = await window['go']['main']['App']['CheckForUpdates']();
+        console.log("Update check result:", result);
         if (result && result !== "App is up to date" && result !== "No updates found") {
           message.info(result);
         }
@@ -162,7 +163,7 @@ function App() {
       console.error("Update check failed", e);
       Modal.error({
         title: '업데이트 확인 실패',
-        content: `업데이트 확인 중 오류가 발생했습니다.\n${e}`,
+        content: `업데이트 확인 중 오류가 발생했습니다.`,
       });
     }
   };
@@ -231,7 +232,7 @@ function App() {
           if (configuredAccount) {
             setDefaultAccountId(configuredAccount.account_id);
             setAccountName(configuredAccount.account_name);
-            setCurrentAccountType(configuredAccount.account_type);
+            setCurrentAccount(configuredAccount);
             // message.success(`API 계정 '${configuredAccount.account_name}'이(가) 설정되었습니다.`);
             return; // Skip modal
           }
@@ -286,24 +287,26 @@ function App() {
       printerMainIP: currentMachine?.printer_main_ip || '',
       printerAux: currentMachine?.printer_aux || '',
       printerAuxIP: currentMachine?.printer_aux_ip || '',
-      templateId: currentMachine?.waybill_template || '',
+      templateId: currentAccount?.waybill_template || '',
       machineId: currentMachine?.machine_id || null,
       shipper_ids: currentMachine?.shipper_ids || null,
-      accountType: currentAccountType,
+      accountType: currentAccount?.account_type || '',
       isOnline: isOnline,
       setIsOnline: setIsOnline,
     }}>
       <div className="container">
-        {/* 메인 탭 네비게이션 */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 10px', backgroundColor: '#f0f2f5' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, backgroundColor: '#1E4496', padding: '10px', borderRadius: '8px' }}>
+        {/* 메인 탭 네비게이션 padding: '0 10px',*/}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#f0f2f5' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, backgroundColor: '#f0f2f5', padding: '10px', borderRadius: '8px' }}> */}
             <img src={logo} alt="logo" style={{ height: '40px', borderRadius: '4px' }} />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {partnerName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{partnerName}</Tag>}
               {accountName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{accountName}</Tag>}
               {machineName && <Tag color="#1E4496" style={{ fontSize: '20px', fontWeight: 'bold', padding: '6px 15px', borderRadius: '8px' }}>{machineName}</Tag>}
-              <Button type="default" onClick={() => setIsAdminModalOpen(true)} style={{ display: currentMachine?.role === '*' ? 'block' : 'none', backgroundColor: '#F26D24', color: '#fff', border: 'none' }}>어드민설정</Button>
+              <Button type="default" onClick={() => setIsAdminModalOpen(true)} style={{ display: currentMachine?.role === '*' ? 'block' : 'none', backgroundColor: '#1E4496', color: '#fff', border: 'none' }}>어드민설정</Button>
+              &nbsp;&nbsp;
             </div>
           </div>
           <Tabs

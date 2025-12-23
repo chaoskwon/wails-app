@@ -98,7 +98,8 @@ const AccountManager = () => {
     { title: 'ID', dataIndex: 'account_id', width: 50 },
     { title: '계정명', dataIndex: 'account_name', width: 150, render: (t: string) => <span style={{ fontWeight: 'bold' }}>{t}</span> },
     { title: 'WBS', dataIndex: 'wbs_id', render: (id: number) => wbsList.find(w => w.wbs_id === id)?.wbs_name },
-    { title: '계정 타입', dataIndex: 'account_type', render: (v: string) => v === 'ONE' ? '화주' : '3PL' },
+    { title: '계정 타입', dataIndex: 'account_type', render: (v: string) => v === 'ONE' ? '화주' : 'WMS(3PL)' },
+    { title: '운송장 템플릿', dataIndex: 'waybill_template' },
     { title: '사용', dataIndex: 'is_active', render: (v: string) => v === 'Y' ? <Tag color="blue">사용</Tag> : <Tag color="red">미사용</Tag> },
     {
       title: '관리', key: 'action', width: 80,
@@ -186,10 +187,18 @@ const AccountManager = () => {
             </Col>
           </Row>
 
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="waybill_template" label="운송장 템플릿">
+                <Input placeholder="예: 12" />
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item name="account_type" label="계정 타입" rules={[{ required: true }]}>
             <Select>
               <Option value="ONE">화주</Option>
-              <Option value="MULTI">3PL</Option>
+              <Option value="MULTI">WMS(3PL)</Option>
             </Select>
           </Form.Item>
           <Form.Item

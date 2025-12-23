@@ -192,7 +192,6 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
         machine_name: values.machine_name,
         partner_id: Number(values.partner_id),
         account_id: values.account_id ? Number(values.account_id) : 0,
-        waybill_template: values.waybill_template,
         printer_main: values.printer_main,
         printer_main_ip: values.printer_main_ip,
         printer_aux: values.printer_aux,
@@ -288,9 +287,6 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
               <Form.Item name="machine_name" label="장비 관리명" rules={[{ required: true, message: '장비 관리명을 입력해주세요' }]}>
                 <Input />
               </Form.Item>
-              <Form.Item name="waybill_template" label="운송장 템플릿">
-                <Input placeholder="예: 12" />
-              </Form.Item>
 
               {/* Show template from selected account hint
               {(() => {
@@ -304,35 +300,51 @@ const LocalMachineSettings: React.FC<LocalMachineSettingsProps> = ({ onSuccess, 
                 }
               })()} */}
 
-              <Form.Item name="printer_main" label="메인 프린터">
-                <AutoComplete
-                  options={mainPrinterOptions}
-                  onSearch={(val) => handlePrinterSearch(val, setMainPrinterOptions)}
-                  onFocus={() => handlePrinterFocus(setMainPrinterOptions)}
-                  onSelect={(val, option) => {
-                    form.setFieldsValue({ printer_main_ip: option.ip });
-                  }}
-                  placeholder="IP 또는 드라이버명"
-                />
-              </Form.Item>
-              <Form.Item name="printer_main_ip" label="메인 프린터 IP">
-                <Input readOnly placeholder="자동 입력됨" style={{ backgroundColor: '#f5f5f5', color: '#666' }} />
-              </Form.Item>
+              <Row gutter={8}>
+                <Col span={16}>
+                  <Form.Item name="printer_main" label="메인 프린터">
+                    <AutoComplete
+                      // size="large"
+                      // style={{ fontSize: '18px' }}
+                      options={mainPrinterOptions}
+                      onSearch={(val) => handlePrinterSearch(val, setMainPrinterOptions)}
+                      onFocus={() => handlePrinterFocus(setMainPrinterOptions)}
+                      onSelect={(val, option) => {
+                        form.setFieldsValue({ printer_main_ip: option.ip });
+                      }}
+                      placeholder="IP 또는 드라이버명"
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="printer_main_ip" label="IP">
+                    <Input size="large" readOnly placeholder="자동" style={{ backgroundColor: '#f5f5f5', color: '#666', textAlign: 'center' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
 
-              <Form.Item name="printer_aux" label="보조 프린터">
-                <AutoComplete
-                  options={auxPrinterOptions}
-                  onSearch={(val) => handlePrinterSearch(val, setAuxPrinterOptions)}
-                  onFocus={() => handlePrinterFocus(setAuxPrinterOptions)}
-                  onSelect={(val, option) => {
-                    form.setFieldsValue({ printer_aux_ip: option.ip });
-                  }}
-                  placeholder="보조 프린터 선택"
-                />
-              </Form.Item>
-              <Form.Item name="printer_aux_ip" label="보조 프린터 IP">
-                <Input readOnly placeholder="자동 입력됨" style={{ backgroundColor: '#f5f5f5', color: '#666' }} />
-              </Form.Item>
+              <Row gutter={8}>
+                <Col span={16}>
+                  <Form.Item name="printer_aux" label="보조 프린터">
+                    <AutoComplete
+                      size="large"
+                      style={{ fontSize: '18px' }}
+                      options={auxPrinterOptions}
+                      onSearch={(val) => handlePrinterSearch(val, setAuxPrinterOptions)}
+                      onFocus={() => handlePrinterFocus(setAuxPrinterOptions)}
+                      onSelect={(val, option) => {
+                        form.setFieldsValue({ printer_aux_ip: option.ip });
+                      }}
+                      placeholder="보조 프린터 선택"
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="printer_aux_ip" label="IP">
+                    <Input size="large" readOnly placeholder="자동" style={{ backgroundColor: '#f5f5f5', color: '#666', textAlign: 'center' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
             </Card>
           </Col>
           <Col span={12}>
